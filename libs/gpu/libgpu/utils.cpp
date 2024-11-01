@@ -1,4 +1,5 @@
 #include "utils.h"
+
 #include "context.h"
 
 #include <libgpu/opencl/engine.h>
@@ -24,7 +25,7 @@ size_t gpu::deviceTypeSize() {
 	if (context.type() == Context::TypeOpenCL) {
 		return sizeof(typename ocl::OpenCLType<T>::type);
 	} else {
-		throw gpu_exception("No GPU active context!");
+		throw gpu_exception("No GPU active context");
 	}
 }
 
@@ -39,7 +40,7 @@ T gpu::deviceTypeMax() {
 	if (context.type() == Context::TypeOpenCL) {
 		return ocl::OpenCLType<T>::max();
 	} else {
-		throw gpu_exception("No GPU active context!");
+		throw gpu_exception("No GPU active context");
 	}
 }
 
@@ -54,14 +55,14 @@ T gpu::deviceTypeMin() {
 	if (context.type() == Context::TypeOpenCL) {
 		return ocl::OpenCLType<T>::min();
 	} else {
-		throw gpu_exception("No GPU active context!");
+		throw gpu_exception("No GPU active context");
 	}
 }
 
 unsigned int gpu::calcNChunk(size_t n, size_t group_size, size_t max_size)
 {
 	if (n == 0)
-		return group_size;
+		return (unsigned int) group_size;
 
 	size_t work_parts_n = (n + max_size - 1) / max_size;
 	size_t exec_n = (n + work_parts_n - 1) / work_parts_n;
@@ -71,6 +72,9 @@ unsigned int gpu::calcNChunk(size_t n, size_t group_size, size_t max_size)
 
 unsigned int gpu::calcColsChunk(size_t width, size_t height, size_t group_size_x, size_t max_size)
 {
+	if (width == 0 || height == 0)
+		return (unsigned int) group_size_x;
+
 	size_t work_parts_n = (width * height + max_size - 1) / max_size;
 	size_t ncols = (width + work_parts_n - 1) / work_parts_n;
 	ncols = (ncols + group_size_x - 1) / group_size_x * group_size_x;
@@ -79,6 +83,9 @@ unsigned int gpu::calcColsChunk(size_t width, size_t height, size_t group_size_x
 
 unsigned int gpu::calcRowsChunk(size_t width, size_t height, size_t group_size_y, size_t max_size)
 {
+	if (width == 0 || height == 0)
+		return (unsigned int) group_size_y;
+
 	size_t work_parts_n = (width * height + max_size - 1) / max_size;
 	size_t nrows = (height + work_parts_n - 1) / work_parts_n;
 	nrows = (nrows + group_size_y - 1) / group_size_y * group_size_y;
@@ -87,6 +94,9 @@ unsigned int gpu::calcRowsChunk(size_t width, size_t height, size_t group_size_y
 
 unsigned int gpu::calcZSlicesChunk(size_t x, size_t y, size_t z, size_t group_size_z, size_t max_size)
 {
+	if (x == 0 || y == 0 || z == 0)
+		return (unsigned int) group_size_z;
+
 	size_t work_parts_n = (z * y * x + max_size - 1) / max_size;
 	size_t z_slices = (z + work_parts_n - 1) / work_parts_n;
 	z_slices = (z_slices + group_size_z - 1) / group_size_z * group_size_z;

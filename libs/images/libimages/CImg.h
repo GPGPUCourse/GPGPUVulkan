@@ -48683,7 +48683,7 @@ namespace cimg_library_suffixed {
     CImg<T>& load_magick(const char *const filename) {
       if (!filename)
         throw CImgArgumentException(_cimg_instance
-                                    "load_magick(): Specified filename is (null).",
+                    "load_magick(): Specified filename is (null).",
                                     cimg_instance);
 #ifdef cimg_use_magick
       Magick::Image image(filename);

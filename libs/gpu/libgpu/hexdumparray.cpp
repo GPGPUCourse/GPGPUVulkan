@@ -15,7 +15,7 @@ int main(int argc, char **argv)
     std::string arrayName(argv[3]);
 
     std::ifstream fin(sourceFilename, std::ios::binary);
-    std::ofstream fout(headerFilename);
+    std::ofstream fout(headerFilename, std::ios_base::app);
 
     if (!fin) {
         std::cerr << "Can't open file " << sourceFilename << "!" << std::endl;

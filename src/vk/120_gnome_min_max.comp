@@ -1,0 +1,26 @@
+#version 450
+
+#include <libgpu/vulkan/vk/atomic.vk>
+#include <libgpu/vulkan/vk/common.vk>
+
+#include "defines.h"
+
+layout (std430, binding = 0) readonly	buffer VerticesIn	{	float vertices_xyz_uv[];	};
+layout (std430, binding = 1) 			buffer MinMaxIn		{	uint/*in-fact it is float*/ minXYZ[3]; uint/*in-fact it is float*/ maxXYZ[3];	};
+
+layout (push_constant) uniform PushConstants {
+    uint nvertices;
+} params;
+
+layout (local_size_x = VK_GROUP_SIZE) in;
+void main()
+{
+	const uint vi = gl_GlobalInvocationID.x;
+	if (vi < params.nvertices) {
+		vec3 xyz = vec3(vertices_xyz_uv[5 * vi + 0], vertices_xyz_uv[5 * vi + 1], vertices_xyz_uv[5 * vi + 2]);
+
+		atomicMinFloat(minXYZ[0], xyz.x);	atomicMaxFloat(maxXYZ[0], xyz.x);
+		atomicMinFloat(minXYZ[1], xyz.y);	atomicMaxFloat(maxXYZ[1], xyz.y);
+		atomicMinFloat(minXYZ[2], xyz.z);	atomicMaxFloat(maxXYZ[2], xyz.z);
+	}
+}

@@ -4,6 +4,10 @@
 #include <cstddef>
 #include <cassert>
 #include <string>
+#include <vector>
+#include <memory>
+
+#include <libbase/data_type.h>
 
 namespace cimg_library {
     template<typename T>
@@ -27,107 +31,158 @@ const mouse_click_t MOUSE_LEFT = 1;
 const mouse_click_t MOUSE_RIGHT = 2;
 const mouse_click_t MOUSE_MIDDLE = 4;
 
+typedef unsigned int keycode_t;
+keycode_t getKeyCode(const char* keycode);
+inline keycode_t getEscapeKeyCode() { return getKeyCode("ESC"); }
+
 class CImgDisplayWrapper;
 
-namespace images {
+class AnyImage;
 
+template <typename T>
+class TypedImage;
+
+class ImageWindow {
+public:
+    ImageWindow(std::string title);
+
+    void display(const AnyImage &image);
     template <typename T>
-    class Image;
+    void display(const TypedImage<T> &image);
+    void resize(size_t width, size_t height);
+    void resize();
+    void setTitle(std::string title);
 
-    class ImageWindow {
-    public:
-        ImageWindow(std::string title);
-        ~ImageWindow();
+    bool isClosed();
+    bool isResized();
 
-        template<typename T>
-        void display(Image<T> image);
-        void resize(size_t width, size_t height);
-        void resize();
-        void wait(unsigned int milliseconds);
-        void setTitle(std::string title);
+    keycode_t wait(unsigned int milliseconds);
 
-        bool isClosed();
-        bool isResized();
+    mouse_click_t getMouseClick();
+    int getMouseX();
+    int getMouseY();
 
-        mouse_click_t getMouseClick();
-        int getMouseX();
-        int getMouseY();
+    size_t width();
+    size_t height();
 
-        size_t width();
-        size_t height();
+protected:
+    std::shared_ptr<CImgDisplayWrapper> cimg_display;
+    std::string title;
+};
 
-    protected:
-        CImgDisplayWrapper* cimg_display;
-        std::string title;
-    };
+// wait all windows until Escape is pressed or all windows were closed
+void waitAllWindows(std::vector<ImageWindow> windows);
 
-    template <typename T>
-    class Image {
-    public:
-        size_t width;
-        size_t height;
-        size_t cn;
+class AnyImage {
+public:
+    AnyImage();
+    AnyImage(size_t width, size_t height, size_t cn, DataType type);
+    AnyImage(const AnyImage &image);
+    AnyImage(const AnyImage &image, size_t offset_x, size_t offset_y, size_t width, size_t height);
 
-        Image();
-        Image(size_t width, size_t height, size_t cn, const std::shared_ptr<T> &data=nullptr);
-        Image(size_t width, size_t height, size_t cn, const std::shared_ptr<T> &data, size_t offset, ptrdiff_t stride);
-        Image(const Image<T> &image);
-        Image(const char *const filename);
-        Image(const std::string& filename);
+    size_t      width() const       { return width_;                }
+    size_t      height() const      { return height_;               }
+    size_t      channels() const    { return cn_;                   }
+    DataType    type() const        { return type_;                 }
 
-        void fromCImg(CImgWrapper<T>& wrapper);
-        CImgWrapper<T> toCImg();
+    bool        isNull()            { return data_ == nullptr;      }
+    void*       ptr()               { return data_;                 }
+    const void* ptr() const         { return data_;                 }
+    void*       ptr(size_t j)       { rassert(j < height_, 359644174); return data_ + j * stride_ * dataSize(type_); }
+    const void* ptr(size_t j) const { rassert(j < height_, 976926074); return data_ + j * stride_ * dataSize(type_); }
+    void*       ptr(size_t j, size_t i)       { rassert(i < width_, 1346134613631); return (unsigned char*)       ptr(j) + i * cn_ * dataSize(type_); }
+    const void* ptr(size_t j, size_t i) const { rassert(i < width_, 2463463465343); return (const unsigned char*) ptr(j) + i * cn_ * dataSize(type_); }
 
-        Image copy() const;
-        Image<T>& operator=(const Image<T>& that) = default;
-        Image<T> reshape(size_t width, size_t height, size_t cn);
-        Image<T> getCrop(size_t offsetRow, size_t offsetCol, size_t height, size_t width);
-        Image<T> removeAlphaChannel();
+    size_t      stride() const      { return stride_;               } // measured in elements, not in bytes (i.e. mostly equal to width*cn)
 
-        Image<T> resize(size_t width, size_t height=0);
+    ImageWindow show() const;
+    ImageWindow show(const char* title) const;
+	template <typename T>
+	CImgWrapper<T> toCImg() const {
+		TypedImage<T> img(*this);
+		return img.toCImg();
+	}
 
-        void fill(T value);
-        void fill(T value[]);
-        void replace(T a, T b);
-        void replace(T a[], T b[]);
+    void saveJPEG(const char *const filename, int quality=100) const;
+    void saveJPEG(const std::string& filename, int quality=100) const;
+    void savePNG(const char *const filename) const;
+    void savePNG(const std::string& filename) const;
 
-        ImageWindow show(const char* title) const;
+protected:
+    void        allocateData();
+    void        init();
+    void        init(size_t width, size_t height, size_t cn, DataType type);
+    void        init(const AnyImage &image);
 
-        void saveJPEG(const char *const filename, int quality=100);
-        void saveJPEG(const std::string& filename, int quality=100);
-        void savePNG(const char *const filename);
-        void savePNG(const std::string& filename);
+    size_t      width_;
+    size_t      height_;
+    size_t      cn_;
+    DataType    type_;
 
-        bool isNull()   { return !((bool) data);    };
-        T* ptr()        { return data.get();        }
+    size_t      stride_;
 
-        inline T& operator()(size_t row, size_t col) {
-            assert (row < height && col < width);
-            return data.get()[offset + row * stride + col * cn];
-        }
+    std::shared_ptr<unsigned char> data_buffer_;
+    unsigned char                  *data_;
+};
 
-        inline T& operator()(size_t row, size_t col, size_t c) {
-            assert (c >= 0 && c < cn);
-            return data.get()[offset + row * stride + col * cn + c];
-        }
+template <typename T>
+class TypedImage : public AnyImage {
+public:
+    TypedImage();
+    TypedImage(size_t width, size_t height, size_t cn);
+    TypedImage(const TypedImage<T> &image);
+	TypedImage(const AnyImage &image);
+	TypedImage(const TypedImage<T> &image, size_t offset_x, size_t offset_y, size_t width, size_t height);
 
-        inline T operator()(size_t row, size_t col) const {
-            assert (row < height && col < width);
-            return data.get()[offset + row * stride + col * cn];
-        }
+    TypedImage(const char *const filename);
+    TypedImage(const std::string& filename);
 
-        inline T operator()(size_t row, size_t col, size_t c) const {
-            assert (c >= 0 && c < cn);
-            return data.get()[offset + row * stride + col * cn + c];
-        }
+    void fromCImg(CImgWrapper<T>& wrapper);
+    CImgWrapper<T> toCImg() const;
 
-    protected:
-        size_t offset;
-        ptrdiff_t stride;
+    TypedImage copy() const;
+    TypedImage<T>& operator=(const TypedImage<T>& that) = default;
 
-        std::shared_ptr<T> data;
+    void fill(T value);
+    void fill(T value[]);
+    void fillZero() { fill((T) 0); }
+    void replace(T a, T b);
+    void replace(T a[], T b[]);
 
-        void allocateData();
-    };
+    T*          ptr()               { return (T*)       AnyImage::ptr();    }
+    const T*    ptr() const         { return (const T*) AnyImage::ptr();    }
+    T*          ptr(size_t j)       { return (T*)       AnyImage::ptr(j);   }
+    const T*    ptr(size_t j) const { return (const T*) AnyImage::ptr(j);   }
 
-}
+    T& operator()(size_t row, size_t col) {
+        rassert(col < width_, col, width_, 514336953);
+        return ptr(row)[col * cn_];
+    }
+
+    T& operator()(size_t row, size_t col, size_t c) {
+        rassert(col < width_, col, width_, 314336923553);
+        rassert(c < cn_, c, cn_, 843906761);
+        return ptr(row)[col * cn_ + c];
+    }
+
+    T operator()(size_t row, size_t col) const {
+        rassert(col < width_, col, width_, 51433695353);
+        return ptr(row)[col * cn_];
+    }
+
+    T operator()(size_t row, size_t col, size_t c) const {
+        rassert(col < width_, col, width_, 514336923553);
+        rassert(c < cn_, c, cn_, 2143906761);
+        return ptr(row)[col * cn_ + c];
+    }
+
+    double sample(double x, double y, size_t c) const;
+    T sample_casted(double x, double y, size_t c) const;
+
+protected:
+};
+
+typedef TypedImage<unsigned char>   image8u;
+typedef TypedImage<unsigned int>    image32u;
+typedef TypedImage<int>             image32i;
+typedef TypedImage<float>           image32f;

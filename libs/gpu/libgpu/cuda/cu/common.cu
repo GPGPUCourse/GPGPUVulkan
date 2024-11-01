@@ -4,7 +4,6 @@
 #include <libgpu/cuda/utils.h>
 #include <libgpu/work_size.h>
 #include <math.h>
-#include <libutils/types.h>
 
 using gpu::WorkSize;
 
@@ -18,12 +17,12 @@ using gpu::WorkSize;
 #define printf_assert(condition, message)
 #endif
 #define assert_isfinite(value) \
-        printf_assert(isfinite(value), "Value should be finite!");
+        printf_assert(isfinite(value), "Value should be finite");
 
-#define WARP_SIZE 32 // NOTTODO: WHY WARP_SZ IS UNDEFINED?
+#define WARP_SIZE 32 // TODO: WHY WARP_SZ IS UNDEFINED?
 
-#ifndef M_PI
-#define M_PI 3.141592654f
+#ifndef M_PI_F
+#define M_PI_F 3.141592654f
 #endif
 
 namespace cuda {
@@ -110,6 +109,11 @@ namespace cuda {
 		return atomicCAS(p, cmp, val);
 	}
 
+	inline __device__ float2 operator-(const float2 &a)
+	{
+		return make_float2(-a.x, -a.y);
+	}
+
 	inline __device__ float3 operator-(const float3 &a)
 	{
 		return make_float3(-a.x, -a.y, -a.z);
@@ -169,6 +173,11 @@ namespace cuda {
 		return make_float3(a.x * b, a.y * b, a.z * b);
 	}
 
+	inline __device__ float3 operator*(float a, float3 b)
+	{
+		return make_float3(b.x * a, b.y * a, b.z * a);
+	}
+
 	inline __device__ float4 operator*(float4 a, float b)
 	{
 		return make_float4(a.x * b, a.y * b, a.z * b, a.w * b);
@@ -211,6 +220,21 @@ namespace cuda {
 	inline __device__ bool operator==(float4 a, float4 b)
 	{
 		return a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+	}
+
+	inline __device__ bool operator!=(float3 a, float3 b)
+	{
+		return !(a == b);
+	}
+
+	inline __device__ bool operator!=(float4 a, float4 b)
+	{
+		return !(a == b);
+	}
+
+	inline __device__ bool is_zero(float3 v)
+	{
+		return v.x == 0.0f && v.y == 0.0f && v.z == 0.0f;
 	}
 
 	inline __device__ float dot(float2 a, float2 b)
@@ -280,6 +304,11 @@ namespace cuda {
 	} Matrix4x4f;
 
 //______HOST_CODE_______________________________________________________________________________________________________
+
+	inline __host__ float2 make_float2_from_vector(const vector2d &v)
+	{
+		return make_float2((float) v.x(), (float) v.y());
+	}
 
 	inline __host__ float3 make_float3_from_vector(const vector3d &v)
 	{

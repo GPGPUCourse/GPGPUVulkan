@@ -1,13 +1,18 @@
 #include "device_info.h"
 #include "utils.h"
+#include <algorithm>
 #include <iostream>
 #include <vector>
+#include <cctype>
 
 namespace ocl {
 
 DeviceInfo::DeviceInfo()
 {
 	device_type					= 0;
+	image_support				= false;
+	image2d_max_width			= 0;
+	image2d_max_height			= 0;
 	max_compute_units			= 0;
 	max_mem_alloc_size			= 0;
 	max_workgroup_size			= 0;
@@ -23,10 +28,93 @@ DeviceInfo::DeviceInfo()
 	opencl_minor_version		= 0;
 }
 
-void DeviceInfo::print() const
+bool DeviceInfo::supportsFreeMemoryRequest() const
 {
-	std::cout << "Using device: " << device_name << ", " << max_compute_units << " compute units, " << (global_mem_size >> 20) << " MB global memory,"
-		" OpenCL " << opencl_major_version << "." << opencl_minor_version << std::endl;
+	return (device_type == CL_DEVICE_TYPE_GPU && vendor_id == gpu::VENDOR::ID_AMD && hasExtension(CL_AMD_DEVICE_ATTRIBUTE_QUERY_EXT));
+}
+
+uint64_t DeviceInfo::freeMemory() const
+{
+	uint64_t free_mem_size;
+	if (supportsFreeMemoryRequest()) {
+		free_mem_size = 0;
+
+		size_t size = 0;
+
+		cl_int status = CL_SUCCESS;
+		OCL_TRACE(status = clGetDeviceInfo(device_id_, CL_DEVICE_GLOBAL_FREE_MEMORY_AMD, 0, NULL, &size));
+
+		if (status != CL_SUCCESS) {
+			std::cerr << "Warning: CL_DEVICE_GLOBAL_FREE_MEMORY_AMD has failed (error " << status << ") #1" << std::endl;
+		}
+
+		std::vector<unsigned char> buffer(size, 239);
+
+		if (status == CL_SUCCESS) {
+			OCL_TRACE(status = clGetDeviceInfo(device_id_, CL_DEVICE_GLOBAL_FREE_MEMORY_AMD, size, buffer.data(), NULL));
+		}
+
+		if (status != CL_SUCCESS) {
+			std::cerr << "Warning: CL_DEVICE_GLOBAL_FREE_MEMORY_AMD has failed (error " << status << ") #2" << std::endl;
+		}
+
+		bool failed = status != CL_SUCCESS;
+		bool verbose = false;
+
+		if (!failed) {
+			if (size == sizeof(uint32_t) || size == sizeof(uint64_t)) {
+				if (size == sizeof(uint32_t)) {
+					free_mem_size = *((uint32_t *)buffer.data());
+				} else {
+					free_mem_size = *((uint64_t *)buffer.data());
+				}
+				if (free_mem_size > global_mem_size / 1024) {
+					if (verbose) {
+						std::cerr << "Warning: CL_DEVICE_GLOBAL_FREE_MEMORY_AMD returned too big free memory: ";
+					}
+					failed = true;
+				} else {
+					free_mem_size *= 1024; // converting from KBytes to bytes
+				}
+			} else {
+				std::cerr << "Warning: CL_DEVICE_GLOBAL_FREE_MEMORY_AMD returned unexpected size: ";
+				failed = true;
+			}
+		}
+
+		if (failed) {
+			if (verbose) {
+				std::cerr << "Data[" << size << "]";
+				if (size > 0) {
+					auto flags = std::cerr.flags();
+					std::cerr << "=" << std::hex;
+					for (size_t i = 0; i < std::min(size, (size_t) 32); ++i) {
+						std::cerr << +(buffer[i]);
+						if (i < size - 1) std::cerr << ",";
+					}
+					std::cerr.flags(flags);
+				}
+				std::cerr << " free_mem_size=" << free_mem_size << " global_mem_size=" << (global_mem_size / 1024) << std::endl;
+			}
+
+			free_mem_size = global_mem_size - global_mem_size / 5;
+		}
+	} else {
+		free_mem_size = global_mem_size - global_mem_size / 5;
+	}
+	return free_mem_size;
+}
+
+void DeviceInfo::print(uint64_t free_mem_size) const
+{
+	std::cout << "Using device: " << device_name << ", " << max_compute_units << " compute units";
+	if (free_mem_size != (uint64_t) -1) {
+		std::cout << ", free memory: " << (free_mem_size >> 20) << "/" << (global_mem_size >> 20) << " MB";
+	} else {
+		std::cout << ", " << (global_mem_size >> 20) << " MB global memory";
+	}
+	std::cout << ", OpenCL " << opencl_major_version << "." << opencl_minor_version << std::endl;
+
 	std::cout << "  driver version: " << driver_version << ", platform version: " << platform_version << std::endl;
 	std::cout << "  max work group size " << max_workgroup_size << std::endl;
 	std::cout << "  max work item sizes [" << max_work_item_sizes[0] << ", " << max_work_item_sizes[1] << ", " << max_work_item_sizes[2] << "]" << std::endl;
@@ -37,12 +125,27 @@ void DeviceInfo::print() const
 		std::cout << "  wavefront width " << wavefront_width << std::endl;
 }
 
+std::string DeviceInfo::getDriverVersion(cl_device_id device_id)
+{
+	char driver_version_string[1024] = "";
+	if (CL_SUCCESS == clGetDeviceInfo(device_id, CL_DRIVER_VERSION, sizeof(driver_version_string), &driver_version_string, NULL)) {
+		return std::string(driver_version_string);
+	} else {
+		return "";
+	}
+}
+
 void DeviceInfo::init(cl_device_id device_id)
 {
+	device_id_ = device_id;
+
 	cl_device_type	device_type					= 0;
 	cl_uint			max_compute_units			= 0;		  // Number of compute units (SM's on NV GPU)
 	cl_uint			max_work_item_dimensions	= 0;
 	size_t			max_workgroup_size			= 0;
+	cl_bool			image_support				= 0;
+	size_t			image2d_max_width			= 0;
+	size_t			image2d_max_height			= 0;
 	cl_uint			vendor_id					= 0;
 	cl_ulong		max_mem_alloc_size			= 0;
 	cl_ulong		global_mem_size				= 0;
@@ -68,6 +171,11 @@ void DeviceInfo::init(cl_device_id device_id)
 	OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_GLOBAL_MEM_SIZE,				sizeof(global_mem_size),			&global_mem_size, NULL));
 	OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_ADDRESS_BITS,				sizeof(device_address_bits),		&device_address_bits, NULL));
 	OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_VENDOR_ID,					sizeof(vendor_id),					&vendor_id, NULL));
+	OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_IMAGE_SUPPORT,				sizeof(image_support),				&image_support, NULL));
+	if (image_support == CL_TRUE) {
+		OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_IMAGE2D_MAX_WIDTH,		sizeof(image2d_max_width),			&image2d_max_width, NULL));
+		OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_IMAGE2D_MAX_HEIGHT,		sizeof(image2d_max_height),			&image2d_max_height, NULL));
+	}
 
 	std::vector<size_t> max_work_item_sizes(max_work_item_dimensions);
 	OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_MAX_WORK_ITEM_SIZES, max_work_item_dimensions * sizeof(size_t), max_work_item_sizes.data(), NULL));
@@ -78,6 +186,9 @@ void DeviceInfo::init(cl_device_id device_id)
 	this->vendor_name				= std::string(vendor_string);
 	this->device_type				= device_type;
 	this->vendor_id					= vendor_id;
+	this->image_support				= (image_support == CL_TRUE);
+	this->image2d_max_width			= image2d_max_width;
+	this->image2d_max_height		= image2d_max_height;
 	this->max_compute_units			= max_compute_units;
 	this->max_mem_alloc_size		= max_mem_alloc_size;
 	this->max_workgroup_size		= max_workgroup_size;
@@ -90,17 +201,19 @@ void DeviceInfo::init(cl_device_id device_id)
 	initExtensions(platform_id, device_id);
 	initOpenCLVersion(platform_id, device_id);
 
-	if (device_type == CL_DEVICE_TYPE_GPU && vendor_id == ID_AMD && hasExtension(CL_AMD_DEVICE_ATTRIBUTE_QUERY_EXT)) {
+	if (device_type == CL_DEVICE_TYPE_GPU && vendor_id == gpu::VENDOR::ID_AMD && hasExtension(CL_AMD_DEVICE_ATTRIBUTE_QUERY_EXT)) {
 		OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_BOARD_NAME_AMD, sizeof(device_string), &device_string, NULL));
 		this->device_name = std::string(device_string) + " (" + this->device_name + ")";
 	}
 
+	this->clean_device_name			= cleanDeviceName(this->device_name);
+
 	cl_uint warp_size = 0;
 	size_t wavefront_width = 0;
 	if (device_type == CL_DEVICE_TYPE_GPU) {
-		if (vendor_id == ID_NVIDIA && hasExtension(CL_NV_DEVICE_ATTRIBUTE_QUERY_EXT)) {
+		if (vendor_id == gpu::VENDOR::ID_NVIDIA && hasExtension(CL_NV_DEVICE_ATTRIBUTE_QUERY_EXT)) {
 			OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_WARP_SIZE_NV, sizeof(cl_uint), &warp_size, NULL));
-		} else if (vendor_id == ID_AMD && hasExtension(CL_AMD_DEVICE_ATTRIBUTE_QUERY_EXT)) {
+		} else if (vendor_id == gpu::VENDOR::ID_AMD && hasExtension(CL_AMD_DEVICE_ATTRIBUTE_QUERY_EXT)) {
 			OCL_SAFE_CALL(clGetDeviceInfo(device_id, CL_DEVICE_WAVEFRONT_WIDTH_AMD, sizeof(cl_uint), &wavefront_width, NULL));
 		}
 	}
@@ -164,10 +277,16 @@ void DeviceInfo::parseOpenCLVersion(char* buffer, int buffer_limit, int& major_v
 	minor_verions = atoi(buffer + firstDotIndex + 1);
 }
 
+bool DeviceInfo::isAmdGPU() const
+{
+	return device_type == CL_DEVICE_TYPE_GPU
+		   && (vendor_id == gpu::VENDOR::ID_AMD || vendor_name.find("Advanced Micro Devices") != std::string::npos);
+}
+
 bool DeviceInfo::isIntelGPU() const
 {
 	return device_type == CL_DEVICE_TYPE_GPU
-		   && (vendor_id == ocl::ID_INTEL || vendor_name.find("Intel") != std::string::npos);
+		   && (vendor_id == gpu::VENDOR::ID_INTEL || vendor_name.find("Intel") != std::string::npos);
 }
 
 void DeviceInfo::initExtensions(cl_platform_id platform_id, cl_device_id device_id)
@@ -188,7 +307,7 @@ void DeviceInfo::initExtensions(cl_platform_id platform_id, cl_device_id device_
 		}
 
 		std::string extension = "";
-		for (int i = 0; i <= buffer.size(); i++) {
+		for (size_t i = 0; i <= buffer.size(); i++) {
 			if (i == buffer.size() || buffer[i] == ' ') {
 				if (extension.length() > 0) {
 					extensions.insert(extension);
@@ -200,5 +319,19 @@ void DeviceInfo::initExtensions(cl_platform_id platform_id, cl_device_id device_
 		}
 	}
 }
+
+	std::string DeviceInfo::cleanDeviceName(const std::string &raw_name) const
+	{
+		std::string clean_name(raw_name.size(), 0);
+		for (size_t i = 0; i < raw_name.size(); ++i) {
+			if (std::isalnum(raw_name[i]) || raw_name[i] == '(' || raw_name[i] == ')' || raw_name[i] == ' ') {
+				clean_name[i] = raw_name[i];
+			} else {
+				clean_name[i] = '_';
+			}
+		}
+
+		return clean_name;
+	}
 
 }

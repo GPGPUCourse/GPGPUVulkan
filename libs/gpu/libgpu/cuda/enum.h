@@ -20,6 +20,8 @@ public:
 			clock				= 0;
 			pci_bus_id			= 0;
 			pci_device_id		= 0;
+			compcap_major		= 0;
+			compcap_minor		= 0;
 		}
 
 		int						id;
@@ -29,12 +31,14 @@ public:
 		unsigned int			clock;
 		unsigned int			pci_bus_id;
 		unsigned int			pci_device_id;
+		unsigned int			compcap_major; // compute capability
+		unsigned int			compcap_minor; // compute capability
 	};
 
-	bool	enumDevices();
+	bool	enumDevices(bool silent);
 	std::vector<Device> &	devices()	{ return devices_;		}
 
-	static	bool printInfo(int id);
+	static	bool printInfo(int id, const std::string &opencl_driver_version);
 
 protected:
 	static	bool	compareDevice(const Device &dev1, const Device &dev2);

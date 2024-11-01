@@ -1,5 +1,6 @@
-#include <vector>
 #include "utils.h"
+
+#include <vector>
 
 namespace ocl {
 

@@ -28,7 +28,11 @@ static CudaLibrary cudaLoadLibrary()
 #if defined(__APPLE__) || defined(__MACOSX)
 	return dlopen("/Library/Frameworks/CUDA.framework/Versions/Current/CUDA", RTLD_NOW);
 #else
-	return dlopen("libcuda.so", RTLD_NOW);
+	CudaLibrary lib = dlopen("libcuda.so", RTLD_NOW);
+	if (!lib) {
+		lib = dlopen("libcuda.so.1", RTLD_NOW);
+	}
+	return lib;
 #endif
 }
 

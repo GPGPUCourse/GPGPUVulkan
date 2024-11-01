@@ -20,8 +20,11 @@ public:
 			compute_units		= 0;
 			mem_size			= 0;
 			clock				= 0;
+			max_workgroup_size	= 0;
 			nvidia_pci_bus_id	= 0;
 			nvidia_pci_slot_id	= 0;
+			device_topology_amd = {};
+			unified_memory		= false;
 			has_cl_khr_spir		= false;
 		}
 
@@ -30,21 +33,25 @@ public:
 		cl_platform_id			platform_id;
 		cl_device_type			device_type;
 		std::string				name;
+		std::string				plain_name; // CL_DEVICE_NAME on nvidia & intel, CL_DEVICE_BOARD_NAME_AMD on amd
 		std::string				vendor;
 		std::string				version;
+		std::string				driver_version;
+		bool					unified_memory;
 		unsigned int			compute_units;
 		unsigned long long		mem_size;
 		unsigned int			clock;
+		size_t					max_workgroup_size;
 		unsigned int			nvidia_pci_bus_id;
 		unsigned int			nvidia_pci_slot_id;
 		bool					has_cl_khr_spir;
 
+		ocl::cl_device_topology_amd			device_topology_amd;
+
 		ocl::sh_ptr_ocl_engine	createEngine(bool printInfo=false);
 
-		bool	isCPU(void)	{ return device_type == CL_DEVICE_TYPE_CPU;	}
-		bool	isGPU(void)	{ return device_type == CL_DEVICE_TYPE_GPU;	}
-
-		bool printInfo() const;
+		bool	isCPU() const	{ return device_type == CL_DEVICE_TYPE_CPU;	}
+		bool	isGPU() const	{ return device_type == CL_DEVICE_TYPE_GPU;	}
 	};
 
 	class Platform {
@@ -55,13 +62,15 @@ public:
 		std::string				version;
 	};
 
-	bool	enumDevices();
+	bool	enumDevices(bool silent);
 	std::vector<Device> &	devices()	{ return devices_;		}
 	std::vector<Platform> &	platforms()	{ return platforms_;	}
 
+	static	bool printInfo(cl_device_id id);
+
 protected:
-	bool	enumPlatforms();
-	bool	enumDevices(cl_platform_id platform_id);
+	bool	enumPlatforms(bool silent);
+	bool	enumDevices(cl_platform_id platform_id, bool silent);
 
 	bool	queryDeviceInfo(Device &device);
 	bool	queryDeviceInfo(cl_device_id device_id, unsigned int param, std::string &value, const std::string &param_name, size_t max_size = 0);

@@ -1,6 +1,10 @@
 #pragma once
 
+#define CL_TARGET_OPENCL_VERSION 210
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+
 #include <set>
+#include <mutex>
 #include <vector>
 #include <limits>
 #include <iostream>
@@ -8,10 +12,13 @@
 #include <stdint.h>
 
 #include <CL/cl.h>
+#include "libbase/string_utils.h"
+#include "../../../base/libbase/data_type.h"
 #include <libgpu/work_size.h>
 #include <libgpu/opencl/device_info.h>
 #include <libgpu/opencl/utils.h>
 #include <libgpu/utils.h>
+#include "../../../base/libbase/thread_mutex.h"
 #include <memory>
 #include <map>
 
@@ -148,6 +155,8 @@ namespace ocl {
 
 		void				init(cl_device_id device_id = 0, const char *cl_params = 0, bool verbose = false);
 		void				init(cl_platform_id platform_id = 0, cl_device_id device_id = 0, const char *cl_params = 0, bool verbose = false);
+		cl_mem				createImage2D(size_t width, size_t height, size_t cn, DataType data_type);
+		cl_sampler			createImageSampler();
 		cl_mem				createBuffer(cl_mem_flags flags, size_t size);
 		void				writeBuffer(cl_mem buffer, cl_bool blocking_write, size_t offset, size_t cb, const void *ptr);
 		void				writeBufferRect(cl_mem buffer, cl_bool blocking_write, const size_t buffer_origin[3], const size_t host_origin[3], const size_t region[3],
@@ -156,9 +165,17 @@ namespace ocl {
 		void				readBufferRect(cl_mem buffer, cl_bool blocking_write, const size_t buffer_origin[3], const size_t host_origin[3], const size_t region[3],
 											size_t buffer_row_pitch, size_t buffer_slice_pitch, size_t host_row_pitch, size_t host_slice_pitch, void *ptr);
 		void				copyBuffer(cl_mem src_buffer, cl_mem dst_buffer, size_t src_offset, size_t dst_offset, size_t cb);
+		void				copyBufferToImage(cl_mem src_buffer, cl_mem dst_image, size_t width, size_t height, size_t src_offset, size_t dst_x_offset, size_t dst_y_offset, bool async);
+		void				readImage(cl_mem src_image, size_t width, size_t height, size_t row_pitch, void *ptr);
 		void				ndRangeKernel(OpenCLKernel &kernel, cl_uint work_dim, const size_t *global_work_offset,
-											const size_t *global_work_size, const size_t *local_work_size);
+											const size_t *global_work_size, const size_t *local_work_size, bool synchronized = true);
 		void				releaseMemObject(cl_mem memobj);
+
+		std::string					additionalCompileOptions() const;
+
+		void						initSupportedImageFormatsList();
+		std::string					getProgramBinaryShortId(const std::string &program_name) const;
+		std::string					getProgramBinaryLongId(const std::string &program_name, const std::string &additional_options) const;
 
 		const DeviceInfo &	deviceInfo() const			{ return device_info_;				}
 
@@ -167,15 +184,16 @@ namespace ocl {
 		cl_context			context()					{ return context_;					}
 		cl_command_queue	queue()						{ return command_queue_;			}
 
-		const std::string &	deviceName()				{ return device_info_.device_name;				}
-		size_t				maxComputeUnits() const		{ return device_info_.max_compute_units;		}
-		size_t				maxWorkgroupSize() const	{ return device_info_.max_workgroup_size;		}
-		size_t				maxWorkItemSizes(int dim)	{ return device_info_.max_work_item_sizes[dim];	}
-		size_t				maxMemAllocSize()			{ return device_info_.max_mem_alloc_size;		}
-		size_t				globalMemSize()				{ return device_info_.global_mem_size;			}
-		size_t				deviceAddressBits()			{ return device_info_.device_address_bits;		}
-		size_t 				wavefrontSize()				{ return wavefront_size_;						}
-		size_t 				totalMemSize()				{ return total_mem_size_;						}
+		const std::string &	deviceName() const 				{ return device_info_.device_name;				}
+		size_t				maxComputeUnits() const			{ return device_info_.max_compute_units;		}
+		size_t				maxWorkgroupSize() const		{ return device_info_.max_workgroup_size;		}
+		size_t				maxWorkItemSizes(int dim) const	{ return device_info_.max_work_item_sizes[dim];	}
+		uint64_t			maxMemAllocSize() const			{ return device_info_.max_mem_alloc_size;		}
+		uint64_t			globalMemSize() const			{ return device_info_.global_mem_size;			}
+		size_t				deviceAddressBits() const		{ return device_info_.device_address_bits;		}
+		size_t 				wavefrontSize() const			{ return wavefront_size_;						}
+		uint64_t			totalMemSize() const			{ return total_mem_size_;						}
+		uint64_t			freeMem();
 
 		std::map<int, cl_program> &		programs()	{ return programs_;	}
 		std::map<int, OpenCLKernel *> &	kernels()	{ return kernels_;	}
@@ -186,6 +204,9 @@ namespace ocl {
 	protected:
 		void				trackEvent(cl_event ev, std::string message="");
 
+		void				createContext(cl_platform_id platform_id, cl_device_id device_id);
+		void				releaseContext();
+
 		cl_platform_id		platform_id_;
 		cl_device_id		device_id_;
 		cl_context			context_;
@@ -193,11 +214,38 @@ namespace ocl {
 
 		size_t 				wavefront_size_;
 
+		std::vector<cl_image_format>	supported_image_formats_;
+		bool							supported_image_formats_inited_;
+		bool							print_supported_image_formats_;
+
 		DeviceInfo			device_info_;
-		size_t				total_mem_size_;
+		uint64_t			total_mem_size_;
 
 		std::map<int, cl_program>		programs_;
 		std::map<int, OpenCLKernel *>	kernels_;
+
+		// Although OpenCL specification doesn't prohibit use of multiple contexts for the same
+		// device, in practice drivers are not very well tested for such scenario. For example,
+		// AMD drivers (at least 23.10.2) crash when calling clReleaseContext in parallel from
+		// multiple threads for contexts created on the same device. The problem doesn't seem
+		// to occur when clReleaseContext is called in parallel for contexts created on different devices.
+		// 
+		// To avoid such problem we track a list of created contexts for each device with a reference
+		// count for each context. When a new context needs to be created, we first check if
+		// a context for the same device already exists, and use existing context instead of
+		// creating a new one.
+
+		struct OpenCLContext {
+			cl_platform_id	platform_id;
+			cl_device_id	device_id;
+			cl_context		context;
+			size_t			count;
+		};
+
+		typedef std::map<std::pair<cl_platform_id, cl_device_id>, OpenCLContext> ContextMap;
+
+		static ContextMap	contexts_;
+		static std::mutex	contexts_mutex_;
 	};
 
 	void		oclPrintBuildLog(cl_program program);
@@ -210,54 +258,63 @@ public:
 
 	const char *			data() const				{ return data_;					}
 	size_t					size() const				{ return size_;					}
-	int						deviceAddressBits() const	{ return device_address_bits_;	}
+	size_t					deviceAddressBits() const	{ return device_address_bits_;	}
 	int						openclMajorVersion() const	{ return opencl_major_version_;	}
 	int						openclMinorVersion() const	{ return opencl_minor_version_;	}
+	std::pair<int, int>		openclVersion() const		{ return std::make_pair(opencl_major_version_, opencl_minor_version_); }
 
 protected:
 	const char *			data_;
 	const size_t			size_;
-	int 					device_address_bits_;
+	size_t					device_address_bits_;
 	const int				opencl_major_version_;
 	const int				opencl_minor_version_;
 };
 
 class ProgramBinaries {
 public:
-	ProgramBinaries(std::vector<VersionedBinary> binaries, std::string defines = std::string(), std::string program_name = std::string());
-	ProgramBinaries(const char *source_code, size_t source_code_length, std::string defines = std::string(), std::string program_name = std::string());
+	ProgramBinaries(std::vector<const VersionedBinary *> binaries, std::string program_name = std::string(), std::string defines = std::string());
+	ProgramBinaries(const char *source_code, size_t source_code_length, std::string program_name = std::string(), std::string defines = std::string());
 
 	int										id() const { return id_; }
 	std::string								defines() const { return defines_; }
 	const VersionedBinary*					getBinary(const std::shared_ptr<OpenCLEngine> &cl) const;
+	const VersionedBinary*					getBinary(OpenCLEngine *cl) const;
 	const std::string &						programName() const { return program_name_; };
 
 protected:
 	int										id_;
-	std::vector<VersionedBinary>			binaries_;
+	std::vector<const VersionedBinary *>	binaries_;
+	std::shared_ptr<VersionedBinary>		binary_with_lifetime_;
 	std::string								program_name_;
 	std::string								defines_;
 };
 
 class KernelSource {
 public:
+	KernelSource(ocl::ProgramBinaries& program, const char *name);
+	KernelSource(ocl::ProgramBinaries& program, const std::string &name);
 	KernelSource(std::shared_ptr<ocl::ProgramBinaries> program, const char *name);
 	KernelSource(std::shared_ptr<ocl::ProgramBinaries> program, const std::string &name);
 
 	typedef OpenCLKernel::Arg Arg;
 
 	void exec(const gpu::WorkSize &ws, const Arg &arg0 = Arg(), const Arg &arg1 = Arg(), const Arg &arg2 = Arg(), const Arg &arg3 = Arg(), const Arg &arg4 = Arg(), const Arg &arg5 = Arg(), const Arg &arg6 = Arg(), const Arg &arg7 = Arg(), const Arg &arg8 = Arg(), const Arg &arg9 = Arg(), const Arg &arg10 = Arg(), const Arg &arg11 = Arg(), const Arg &arg12 = Arg(), const Arg &arg13 = Arg(), const Arg &arg14 = Arg(), const Arg &arg15 = Arg(), const Arg &arg16 = Arg(), const Arg &arg17 = Arg(), const Arg &arg18 = Arg(), const Arg &arg19 = Arg(), const Arg &arg20 = Arg(), const Arg &arg21 = Arg(), const Arg &arg22 = Arg(), const Arg &arg23 = Arg(), const Arg &arg24 = Arg(), const Arg &arg25 = Arg(), const Arg &arg26 = Arg(), const Arg &arg27 = Arg(), const Arg &arg28 = Arg(), const Arg &arg29 = Arg(), const Arg &arg30 = Arg(), const Arg &arg31 = Arg(), const Arg &arg32 = Arg(), const Arg &arg33 = Arg(), const Arg &arg34 = Arg(), const Arg &arg35 = Arg(), const Arg &arg36 = Arg(), const Arg &arg37 = Arg(), const Arg &arg38 = Arg(), const Arg &arg39 = Arg(), const Arg &arg40 = Arg());
+	void execAsynchronized(const gpu::WorkSize &ws, const Arg &arg0 = Arg(), const Arg &arg1 = Arg(), const Arg &arg2 = Arg(), const Arg &arg3 = Arg(), const Arg &arg4 = Arg(), const Arg &arg5 = Arg(), const Arg &arg6 = Arg(), const Arg &arg7 = Arg(), const Arg &arg8 = Arg(), const Arg &arg9 = Arg(), const Arg &arg10 = Arg(), const Arg &arg11 = Arg(), const Arg &arg12 = Arg(), const Arg &arg13 = Arg(), const Arg &arg14 = Arg(), const Arg &arg15 = Arg(), const Arg &arg16 = Arg(), const Arg &arg17 = Arg(), const Arg &arg18 = Arg(), const Arg &arg19 = Arg(), const Arg &arg20 = Arg(), const Arg &arg21 = Arg(), const Arg &arg22 = Arg(), const Arg &arg23 = Arg(), const Arg &arg24 = Arg(), const Arg &arg25 = Arg(), const Arg &arg26 = Arg(), const Arg &arg27 = Arg(), const Arg &arg28 = Arg(), const Arg &arg29 = Arg(), const Arg &arg30 = Arg(), const Arg &arg31 = Arg(), const Arg &arg32 = Arg(), const Arg &arg33 = Arg(), const Arg &arg34 = Arg(), const Arg &arg35 = Arg(), const Arg &arg36 = Arg(), const Arg &arg37 = Arg(), const Arg &arg38 = Arg(), const Arg &arg39 = Arg(), const Arg &arg40 = Arg());
 	void execSubdivided(const gpu::WorkSize &ws, const Arg &arg0 = Arg(), const Arg &arg1 = Arg(), const Arg &arg2 = Arg(), const Arg &arg3 = Arg(), const Arg &arg4 = Arg(), const Arg &arg5 = Arg(), const Arg &arg6 = Arg(), const Arg &arg7 = Arg(), const Arg &arg8 = Arg(), const Arg &arg9 = Arg(), const Arg &arg10 = Arg(), const Arg &arg11 = Arg(), const Arg &arg12 = Arg(), const Arg &arg13 = Arg(), const Arg &arg14 = Arg(), const Arg &arg15 = Arg(), const Arg &arg16 = Arg(), const Arg &arg17 = Arg(), const Arg &arg18 = Arg(), const Arg &arg19 = Arg(), const Arg &arg20 = Arg(), const Arg &arg21 = Arg(), const Arg &arg22 = Arg(), const Arg &arg23 = Arg(), const Arg &arg24 = Arg(), const Arg &arg25 = Arg(), const Arg &arg26 = Arg(), const Arg &arg27 = Arg(), const Arg &arg28 = Arg(), const Arg &arg29 = Arg(), const Arg &arg30 = Arg(), const Arg &arg31 = Arg(), const Arg &arg32 = Arg(), const Arg &arg33 = Arg(), const Arg &arg34 = Arg(), const Arg &arg35 = Arg(), const Arg &arg36 = Arg(), const Arg &arg37 = Arg(), const Arg &arg38 = Arg(), const Arg &arg39 = Arg(), const Arg &arg40 = Arg());
 
 	void precompile(bool printLog=false);
 	void precompile(const std::shared_ptr<OpenCLEngine> &cl, bool printLog=false);
+
+	size_t getMaxWorkgroupSize();
 
 protected:
 	int getNextKernelId();
 
 	OpenCLKernel *getKernel(const std::shared_ptr<OpenCLEngine> &cl, bool printLog=false);
 
-	std::shared_ptr<ocl::ProgramBinaries> program_;
+	ocl::ProgramBinaries					&program_;
+	std::shared_ptr<ocl::ProgramBinaries>	program_lifetime_;
 
 	int				id_;
 	std::string		name_;

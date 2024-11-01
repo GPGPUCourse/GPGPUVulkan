@@ -64,7 +64,7 @@ namespace gold {
 
     void ensure(bool condition, int line) {
         if (!condition) {
-            std::cerr << "GOLD check filed at line " << line << "!" << std::endl;
+            std::cerr << "GOLD check filed at line " << line << std::endl;
         }
     }
 

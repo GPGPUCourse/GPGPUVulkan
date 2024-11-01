@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <stdexcept>
+#include "libbase/string_utils.h"
 
 namespace gpu {
 
@@ -30,7 +30,7 @@ namespace gpu {
 	template <typename T>
 	T deviceTypeMin();
 
-	inline unsigned int divup(unsigned int num, unsigned int denom) {
+	inline size_t divup(size_t num, size_t denom) {
 		return (num + denom - 1) / denom;
 	}
 
@@ -38,7 +38,19 @@ namespace gpu {
 	unsigned int calcColsChunk(size_t width, size_t height, size_t group_size_x, size_t max_size=1000*1000);
 	unsigned int calcRowsChunk(size_t width, size_t height, size_t group_size_y, size_t max_size=1000*1000);
 	unsigned int calcZSlicesChunk(size_t x, size_t y, size_t z, size_t group_size_z, size_t max_size=1000*1000);
+
+	// see https://pcisig.com/membership/member-companies
+	enum VENDOR {
+		ID_AMD		= 0x1002,
+		ID_INTEL	= 0x8086,
+		ID_NVIDIA	= 0x10de,
+		ID_APPLE	= 0x106b,
+	};
 }
 
-#define GPU_CHECKED_VERBOSE(x, message)	if (!(x)) {gpu::raiseException(__FILE__, __LINE__, message);}
-#define GPU_CHECKED(x)					if (!(x)) {gpu::raiseException(__FILE__, __LINE__, "");}
+#ifndef _SHORT_FILE_
+#define _SHORT_FILE_ "unknown"
+#endif
+
+#define GPU_CHECKED_VERBOSE(x, message)	if (!(x)) {gpu::raiseException(_SHORT_FILE_, __LINE__, message);}
+#define GPU_CHECKED(x)					if (!(x)) {gpu::raiseException(_SHORT_FILE_, __LINE__, "");}

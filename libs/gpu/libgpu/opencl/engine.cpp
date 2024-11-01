@@ -1,8 +1,14 @@
+#include "engine.h"
+
+#define _SHORT_FILE_ "ocl_engine.cpp"
+
 #include "utils.h"
-#include "libutils/thread_mutex.h"
+#include <libbase/timer.h>
+#include <libbase/thread_mutex.h>
 
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -15,9 +21,7 @@
 #include <CL/cl_ext.h>
 #include <libgpu/context.h>
 #include <libgpu/shared_device_buffer.h>
-#include <libutils/timer.h>
-
-#define _SHORT_FILE_ "ocl_engine.cpp"
+#include <libgpu/device.h>
 
 #define LOAD_KERNEL_BINARIES_FROM_FILE ""
 #define DUMP_KERNEL_BINARIES_TO_FILE ""
@@ -71,14 +75,15 @@ OpenCLKernel::OpenCLKernel()
 
 OpenCLKernel::~OpenCLKernel()
 {
-	if (kernel_)	clReleaseKernel(kernel_);
+	if (kernel_)
+		OCL_NOTHROW(OCL_SAFE_CALL(clReleaseKernel(kernel_)));
 }
 
 void OpenCLKernel::create(cl_program program, const char *kernel_name, cl_device_id device_id_)
 {
 	if (device_id_ == NULL) {
 		gpu::Context context;
-		GPU_CHECKED_VERBOSE(context.type() == gpu::Context::TypeOpenCL, "Can not link with OpenCL kernel!");
+		GPU_CHECKED_VERBOSE(context.type() == gpu::Context::TypeOpenCL, "Can not link with OpenCL kernel");
 		device_id_ = context.cl()->device();
 	}
 
@@ -106,13 +111,19 @@ void OpenCLKernel::setArg(cl_uint arg_index, size_t arg_size, const void *arg_va
 		throw std::runtime_error("clSetKernelArg " + to_string(kernel_name_) + "#" + to_string(arg_index) + " (" +to_string(arg_size) + " bytes) failed: " + errorString(ciErrNum));
 }
 
+OpenCLEngine::ContextMap	OpenCLEngine::contexts_;
+std::mutex					OpenCLEngine::contexts_mutex_;
+
 OpenCLEngine::OpenCLEngine()
 {
-	platform_id_				= 0;
-	device_id_					= 0;
-	context_					= 0;
-	command_queue_				= 0;
-	total_mem_size_				= 0;
+	platform_id_					= 0;
+	device_id_						= 0;
+	context_						= 0;
+	command_queue_					= 0;
+	total_mem_size_					= 0;
+
+	supported_image_formats_inited_	= false;
+	print_supported_image_formats_	= false;
 }
 
 OpenCLEngine::~OpenCLEngine()
@@ -121,10 +132,74 @@ OpenCLEngine::~OpenCLEngine()
 		delete it->second;
 
 	for (std::map<int, cl_program>::iterator it = programs_.begin(); it != programs_.end(); ++it)
-		clReleaseProgram(it->second);
+		OCL_NOTHROW(OCL_SAFE_CALL(clReleaseProgram(it->second)));
 
-	if (command_queue_)		clReleaseCommandQueue(command_queue_);
-	if (context_)			clReleaseContext(context_);
+	if (command_queue_)
+		OCL_NOTHROW(OCL_SAFE_CALL(clReleaseCommandQueue(command_queue_)));
+
+	OCL_NOTHROW(releaseContext());
+}
+
+void OpenCLEngine::createContext(cl_platform_id platform_id, cl_device_id device_id)
+{
+	std::lock_guard<std::mutex> lock(contexts_mutex_);
+
+	cl_context context = 0;
+
+	ContextMap::iterator it = contexts_.find(std::make_pair(platform_id, device_id));
+	if (it != contexts_.end()) {
+		it->second.count += 1;
+
+		context = it->second.context;
+	} else {
+		cl_context_properties context_props[] = { CL_CONTEXT_PLATFORM, (cl_context_properties) platform_id, 0 };
+
+		cl_int ciErrNum;
+		OCL_TRACE(context = clCreateContext(context_props, 1, &device_id, NULL, NULL, &ciErrNum));
+		OCL_SAFE_CALL(ciErrNum);
+
+		bool opencl_share_context = true;
+		if (opencl_share_context) {
+			OpenCLContext ctx;
+			ctx.platform_id	= platform_id;
+			ctx.device_id	= device_id;
+			ctx.context		= context;
+			ctx.count		= 1;
+			contexts_[std::make_pair(platform_id, device_id)] = ctx;
+		}
+	}
+
+	context_		= context;
+	platform_id_	= platform_id;
+	device_id_		= device_id;
+}
+
+void OpenCLEngine::releaseContext()
+{
+	cl_context context = context_;
+	if (!context)
+		return;
+
+	std::lock_guard<std::mutex> lock(contexts_mutex_);
+
+	ContextMap::key_type context_key(platform_id_, device_id_);
+
+	context_		= 0;
+	platform_id_	= 0;
+	device_id_		= 0;
+
+	ContextMap::iterator it = contexts_.find(context_key);
+
+	if (it != contexts_.end() && it->second.context == context) {
+		if (it->second.count > 1) {
+			it->second.count -= 1;
+			return;
+		} else {
+			contexts_.erase(it);
+		}
+	}
+
+	OCL_SAFE_CALL(clReleaseContext(context));
 }
 
 void OpenCLEngine::init(cl_device_id device_id, const char *cl_params, bool verbose)
@@ -140,20 +215,23 @@ void OpenCLEngine::init(cl_device_id device_id, const char *cl_params, bool verb
 	return init(platform_id, device_id, cl_params, verbose);
 }
 
+namespace ocl {
+	static std::map<std::pair<cl_platform_id, cl_device_id>, bool>	cached_spir_checks;
+	static Mutex													cached_spir_checks_mutex;
+	static Mutex													shrink_cache_mutex;
+}
+
 void OpenCLEngine::init(cl_platform_id platform_id, cl_device_id device_id, const char *cl_params, bool verbose)
 {
 	if (!ocl_init())
 		throw ocl_exception("Can't init OpenCL driver");
 
 	if (command_queue_) {
-		clReleaseCommandQueue(command_queue_);
+		OCL_SAFE_CALL(clReleaseCommandQueue(command_queue_));
 		command_queue_ = 0;
 	}
 
-	if (context_) {
-		clReleaseContext(context_);
-		context_ = 0;
-	}
+	releaseContext();
 
 	if (!platform_id) {
 		device_id	= 0;
@@ -169,7 +247,7 @@ void OpenCLEngine::init(cl_platform_id platform_id, cl_device_id device_id, cons
 		if (uiNumDevices < 1)
 			throw ocl_exception("No OpenCL devices found");
 
-//		std::cout << uiNumDevices << " devices available" << std::endl;
+		std::cout << uiNumDevices << " devices available" << std::endl;
 
 		std::vector<cl_device_id> devices(uiNumDevices);
 		OCL_SAFE_CALL(clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_GPU, uiNumDevices, devices.data(), NULL));
@@ -183,17 +261,11 @@ void OpenCLEngine::init(cl_platform_id platform_id, cl_device_id device_id, cons
 
 	total_mem_size_ = device_info_.global_mem_size;
 
-	cl_context_properties context_props[] = { CL_CONTEXT_PLATFORM, (cl_context_properties) platform_id, 0 };
+	createContext(platform_id, device_id);
 
 	cl_int ciErrNum;
-	context_		= clCreateContext(context_props, 1, &device_id, NULL, NULL, &ciErrNum);
+	OCL_TRACE(command_queue_ = clCreateCommandQueue(context_, device_id, 0, &ciErrNum));
 	OCL_SAFE_CALL(ciErrNum);
-
-	command_queue_	= clCreateCommandQueue(context_, device_id, 0, &ciErrNum);
-	OCL_SAFE_CALL(ciErrNum);
-
-	platform_id_	= platform_id;
-	device_id_		= device_id;
 
 	if (device_info_.device_type == CL_DEVICE_TYPE_GPU) {
 		if (device_info_.warp_size) {
@@ -244,14 +316,125 @@ void ocl::oclPrintBuildLog(cl_program program)
 	}
 }
 
-cl_mem OpenCLEngine::createBuffer(cl_mem_flags flags, size_t size)
+void OpenCLEngine::initSupportedImageFormatsList()
 {
-//	if (size > device_info_.max_mem_alloc_size) {
-//		throw ocl_bad_alloc("Can't allocate " + to_string(size) + " bytes, because max allocation size is " + to_string(device_info_.max_mem_alloc_size) + "!");
-//	}
+	if (supported_image_formats_inited_)
+		return;
+	if (!device_info_.image_support)
+		throw ocl_bad_alloc("Can't fetch supported image formats list, because of a lack of CL_DEVICE_IMAGE_SUPPORT");
+
+	cl_uint num_image_formats = 0;
+	OCL_SAFE_CALL(clGetSupportedImageFormats(context_, CL_MEM_READ_WRITE, CL_MEM_OBJECT_IMAGE2D, 0, NULL, &num_image_formats));
+	std::vector<cl_image_format> image_formats(num_image_formats);
+	OCL_SAFE_CALL(clGetSupportedImageFormats(context_, CL_MEM_READ_WRITE, CL_MEM_OBJECT_IMAGE2D, num_image_formats, image_formats.data(), NULL));
+
+	supported_image_formats_ = image_formats;
+	supported_image_formats_inited_ = true;
+}
+
+cl_mem OpenCLEngine::createImage2D(size_t width, size_t height, size_t cn, DataType data_type)
+{
+	if (!device_info_.image_support) {
+		throw ocl_bad_alloc("Can't allocate 2D image, because of a lack of CL_DEVICE_IMAGE_SUPPORT");
+	}
+	if (width > device_info_.image2d_max_width || height > device_info_.image2d_max_height) {
+		throw ocl_bad_alloc("Can't allocate " + to_string(width) + "x" + to_string(height) + " 2D image, because max image size on this device: " + to_string(device_info_.image2d_max_width) + "x" + to_string(device_info_.image2d_max_height));
+	}
+	if (!supported_image_formats_inited_) {
+		initSupportedImageFormatsList();
+	}
+
+	cl_mem_flags flags = CL_MEM_READ_WRITE;
+	cl_image_format format;
+
+	{
+		// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/cl_image_format.html
+		if        (cn == 1) {
+			format.image_channel_order = CL_R;
+		} else if (cn == 2) {
+			format.image_channel_order = CL_RG;
+		} else if (cn == 3) {
+			format.image_channel_order = CL_RGB;
+		} else if (cn == 4) {
+			format.image_channel_order = CL_RGBA;
+		}
+		if        (data_type == DataType8u) {
+			format.image_channel_data_type = CL_UNORM_INT8;
+		} else if (data_type == DataType16u) {
+			format.image_channel_data_type = CL_UNORM_INT16;
+		} else if (data_type == DataType32u) {
+			throw std::runtime_error("OpenCLEngine::createImage2D(): DataType32u not supported!"); // because it seems that it can't be used with bilinear interpolation
+		} else if (data_type == DataType8i) {
+			format.image_channel_data_type = CL_SNORM_INT8;
+		} else if (data_type == DataType16i) {
+			format.image_channel_data_type = CL_SNORM_INT16;
+		} else if (data_type == DataType32i) {
+			throw std::runtime_error("OpenCLEngine::createImage2D(): DataType32i not supported!"); // because it seems that it can't be used with bilinear interpolation
+		} else if (data_type == DataType32f) {
+			format.image_channel_data_type = CL_FLOAT;
+		} else {
+			throw std::runtime_error("Unsupported data type: " + typeName(data_type));
+		}
+	}
+
+#if 1
+	cl_image_desc image_desc;
+	{
+		// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/cl_image_desc.html
+		image_desc.image_type = CL_MEM_OBJECT_IMAGE2D;
+		image_desc.image_width = width;
+		image_desc.image_height = height;
+		image_desc.image_depth = 0;
+		image_desc.image_array_size = 0;
+		image_desc.image_row_pitch = 0;
+		image_desc.image_slice_pitch = 0;
+		image_desc.num_mip_levels = 0;
+		image_desc.num_samples = 0;
+		image_desc.buffer = NULL;
+	}
 
 	cl_int status = CL_SUCCESS;
-	cl_mem res = clCreateBuffer(context_, flags, size, NULL, &status);
+	cl_mem res;
+	// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateImage.html
+	OCL_TRACE(res = clCreateImage(context_, flags, &format, &image_desc, NULL, &status)); // requires OpenCL 1.2
+	OCL_SAFE_CALL_MESSAGE(status, "Image type " + to_string(cn) + "x" + typeName(data_type) + ": ");
+#else
+	cl_int status = CL_SUCCESS;
+	cl_mem res;
+	// https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/clCreateImage2D.html
+	OCL_TRACE(res = clCreateImage2D(context_, flags, &format, width, height, 0, NULL, &status)); // deprecated but works
+	OCL_SAFE_CALL(status);
+#endif
+
+	return res;
+}
+
+cl_sampler OpenCLEngine::createImageSampler()
+{
+	// https://www.khronos.org/registry/OpenCL/sdk/1.2/docs/man/xhtml/clCreateSampler.html
+	cl_bool normalized_coords = CL_FALSE;
+
+	cl_int status = CL_SUCCESS;
+	cl_sampler res;
+	OCL_TRACE(res = clCreateSampler(context_, normalized_coords, CL_ADDRESS_CLAMP_TO_EDGE, CL_FILTER_LINEAR, &status));
+	OCL_SAFE_CALL(status);
+
+	return res;
+}
+
+cl_mem OpenCLEngine::createBuffer(cl_mem_flags flags, size_t size)
+{
+	if (size > device_info_.max_mem_alloc_size) {
+		throw ocl_bad_alloc("Can't allocate " + to_string(size) + " bytes, because max allocation size is " + to_string(device_info_.max_mem_alloc_size));
+	}
+
+	// avoiding CL_INVALID_BUFFER_SIZE error when trying to allocate buffer with zero size
+	// in case of zero requested size we provide some correct pointer which can be safely passed as an argument to kernels
+	size = std::max<size_t>(size, 1);
+
+	cl_int status = CL_SUCCESS;
+	cl_mem res;
+	OCL_TRACE(res = clCreateBuffer(context_, flags, size, NULL, &status));
 	OCL_SAFE_CALL(status);
 
 	// forcing buffer allocation by fictive write
@@ -261,7 +444,7 @@ cl_mem OpenCLEngine::createBuffer(cl_mem_flags flags, size_t size)
 	int test_data = 239;
 	try {
 		writeBuffer(res, CL_TRUE, 0, data_size, &test_data);
-	} catch (ocl_exception& e) {
+	} catch (ocl_exception &) {
 		releaseMemObject(res);
 		throw;
 	}
@@ -273,6 +456,7 @@ void OpenCLEngine::writeBuffer(cl_mem buffer, cl_bool blocking_write, size_t off
 {
 	if (cb == 0)
 		return;
+
 	OCL_SAFE_CALL(clEnqueueWriteBuffer(queue(), buffer, blocking_write, offset, cb, ptr, 0, NULL, NULL));
 }
 
@@ -281,6 +465,7 @@ void OpenCLEngine::writeBufferRect(cl_mem buffer, cl_bool blocking_write, const 
 {
 	if (region[0] == 0 || region[1] == 0 || region[2] == 0)
 		return;
+
 	OCL_SAFE_CALL(clEnqueueWriteBufferRect(queue(), buffer, blocking_write, buffer_origin, host_origin, region,
 								buffer_row_pitch, buffer_slice_pitch, host_row_pitch, host_slice_pitch, ptr, 0, NULL, NULL));
 }
@@ -289,6 +474,7 @@ void OpenCLEngine::readBuffer(cl_mem buffer, cl_bool blocking_read, size_t offse
 {
 	if (cb == 0)
 		return;
+
 	OCL_SAFE_CALL(clEnqueueReadBuffer(queue(), buffer, blocking_read, offset, cb, ptr, 0, NULL, NULL));
 }
 
@@ -297,6 +483,7 @@ void OpenCLEngine::readBufferRect(cl_mem buffer, cl_bool blocking_write, const s
 {
 	if (region[0] == 0 || region[1] == 0 || region[2] == 0)
 		return;
+
 	OCL_SAFE_CALL(clEnqueueReadBufferRect(queue(), buffer, blocking_write, buffer_origin, host_origin, region,
 								buffer_row_pitch, buffer_slice_pitch, host_row_pitch, host_slice_pitch, ptr, 0, NULL, NULL));
 }
@@ -305,8 +492,38 @@ void OpenCLEngine::copyBuffer(cl_mem src_buffer, cl_mem dst_buffer, size_t src_o
 {
 	if (cb == 0)
 		return;
+
 	cl_event ev = NULL;
 	OCL_SAFE_CALL(clEnqueueCopyBuffer(queue(), src_buffer, dst_buffer, src_offset, dst_offset, cb, 0, NULL, &ev));
+	trackEvent(ev);
+}
+
+void OpenCLEngine::copyBufferToImage(cl_mem src_buffer, cl_mem dst_image,
+		size_t width, size_t height,
+		size_t src_offset,
+		size_t dst_x_offset, size_t dst_y_offset,
+		bool async)
+{
+	size_t dst_origin[3] = {dst_x_offset, dst_y_offset, 0};
+	size_t region[3] = {width, height, 1};
+	cl_event ev = NULL;
+	OCL_SAFE_CALL(clEnqueueCopyBufferToImage(queue(), src_buffer, dst_image, src_offset, dst_origin, region, 0, NULL, async ? NULL : &ev));
+	if (!async) {
+		trackEvent(ev);
+	}
+}
+
+void OpenCLEngine::readImage(cl_mem src_image, size_t width, size_t height, size_t row_pitch, void *ptr)
+{
+	if (width == 0 || height == 0)
+		return;
+
+	cl_bool blocking_read = CL_TRUE;
+	const size_t origin[3] = {0, 0, 0};
+	const size_t region[3] = {width, height, 1};
+	const size_t slice_pitch = 0;
+	cl_event ev = NULL;
+	OCL_SAFE_CALL(clEnqueueReadImage(queue(), src_image, blocking_read, origin, region, row_pitch, slice_pitch, ptr, 0, NULL, &ev));
 	trackEvent(ev);
 }
 
@@ -319,49 +536,51 @@ void OpenCLEngine::releaseMemObject(cl_mem memobj)
 }
 
 void OpenCLEngine::ndRangeKernel(OpenCLKernel &kernel, cl_uint work_dim, const size_t *global_work_offset,
-								 const size_t *global_work_size, const size_t *local_work_size)
+								 const size_t *global_work_size, const size_t *local_work_size, bool synchronized)
 {
 	if (work_dim < 1 || work_dim > 3)
-		throw ocl_exception("Wrong work dimension size: " + to_string(work_dim) + "!");
+		throw ocl_exception("Wrong work dimension size: " + to_string(work_dim));
 
 	// check workgroup size
 	if (local_work_size) {
 		size_t workgroup_size = 1;
 		for (cl_uint dim = 0; dim < work_dim; dim++) {
 			if (local_work_size[dim] > device_info_.max_work_item_sizes[dim])
-				throw ocl_exception("Wrong work_size[" + to_string(dim) + "] value: " + to_string(local_work_size[dim]) + "!");
+				throw ocl_exception("Wrong work_size[" + to_string(dim) + "] value: " + to_string(local_work_size[dim]));
 			workgroup_size *= local_work_size[dim];
 		}
 		if (workgroup_size > device_info_.max_workgroup_size)
-			throw ocl_exception("Too big workgroup size: " + to_string(workgroup_size) + "!");
+			throw ocl_exception("Too big workgroup size: " + to_string(workgroup_size));
 		if (workgroup_size > kernel.workGroupSize())
-			throw ocl_exception("Too big workgroup size for this kernel: " + to_string(workgroup_size) + "!");
+			throw ocl_exception("Too big workgroup size for this kernel: " + to_string(workgroup_size));
 	}
 
 	// If, for example, CL_DEVICE_ADDRESS_BITS = 32, i.e. the device uses a 32-bit address space,
 	// size_t is a 32-bit unsigned integer and global_work_size values must be in the range 1 .. 2^32 - 1.
 	// Values outside this range return a CL_OUT_OF_RESOURCES error.
-	uint64_t max_global_work_size = (size_t) 1 << (device_info_.device_address_bits - 1);
+	uint64_t max_global_work_size = (uint64_t) 1 << (device_info_.device_address_bits - 1);
 	max_global_work_size = max_global_work_size + (max_global_work_size - 1);
 	for (size_t d = 0; d < work_dim; ++d) {
 		if (global_work_size[d] == 0) {
-			std::cerr << "Global work size is zero!" << std::endl;
-			throw ocl_exception("Global work_size[" + to_string(d) + "] value is zero!");
+			std::cerr << "Global work size is zero" << std::endl;
+			throw ocl_exception("Global work_size[" + to_string(d) + "] value is zero");
 		} else if (global_work_size[d] > max_global_work_size && device_info_.device_address_bits <= 64) {
 			throw ocl_exception("Global work_size[" + to_string(d) + "] value is too big for this device address bits: "
-								+ to_string(global_work_size[d]) + ", while device has " + to_string(device_info_.device_address_bits) + " address bits!");
+								+ to_string(global_work_size[d]) + ", while device has " + to_string(device_info_.device_address_bits) + " address bits");
 		}
 	}
 
 	cl_event ev = NULL;
 	OCL_SAFE_CALL(clEnqueueNDRangeKernel(queue(), kernel.kernel(), work_dim, global_work_offset, global_work_size, local_work_size, 0, NULL, &ev));
-	trackEvent(ev, "Kernel " + kernel.kernelName() + ": ");
+	if (synchronized)
+		trackEvent(ev, "Kernel " + kernel.kernelName() + ": ");
+	else
+		OCL_SAFE_CALL_MESSAGE(clReleaseEvent(ev), "Kernel " + kernel.kernelName() + ": ");
 }
 
 void OpenCLEngine::trackEvent(cl_event ev, std::string message)
 {
-	cl_int		ciErrNum	= CL_SUCCESS;
-	cl_int		result		= CL_SUCCESS;
+	cl_int result = CL_SUCCESS;
 
 	try {
 		OCL_SAFE_CALL_MESSAGE(clFlush(queue()), message);
@@ -369,7 +588,7 @@ void OpenCLEngine::trackEvent(cl_event ev, std::string message)
 		OCL_SAFE_CALL_MESSAGE(clGetEventInfo(ev, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(cl_int), &result, 0), message);
 
 		if (result != CL_COMPLETE) {
-			throw ocl_exception("Wait for event succeed, but it is still is not complete with execution status: " + to_string(result) + "!");
+			throw ocl_exception("Wait for event succeed, but it is still is not complete with execution status: " + to_string(result));
 		}
 	} catch (...) {
 		OCL_SAFE_CALL_MESSAGE(clReleaseEvent(ev), message);
@@ -392,7 +611,17 @@ OpenCLKernel *OpenCLEngine::findKernel(int id) const
 	std::map<int, OpenCLKernel *>::const_iterator it = kernels_.find(id);
 	if (it != kernels_.end())
 		return it->second;
-	return 0;
+	return nullptr;
+}
+
+uint64_t OpenCLEngine::freeMem()
+{
+	return device_info_.freeMemory();
+}
+
+std::string OpenCLEngine::getProgramBinaryShortId(const std::string &program_name) const
+{
+	return program_name + std::to_string((long long)deviceInfo().vendor_id) + deviceInfo().clean_device_name;
 }
 
 VersionedBinary::VersionedBinary(const char *data, const size_t size,
@@ -400,7 +629,7 @@ VersionedBinary::VersionedBinary(const char *data, const size_t size,
 		: data_(data), size_(size), device_address_bits_(bits), opencl_major_version_(opencl_major_version), opencl_minor_version_(opencl_minor_version)
 {}
 
-ProgramBinaries::ProgramBinaries(std::vector<VersionedBinary> binaries, std::string defines, std::string program_name) : binaries_(binaries)
+ProgramBinaries::ProgramBinaries(std::vector<const VersionedBinary *> binaries, std::string program_name, std::string defines) : binaries_(binaries)
 {
 	static int next_program_id = 0;
 	program_name_ = program_name;
@@ -408,7 +637,7 @@ ProgramBinaries::ProgramBinaries(std::vector<VersionedBinary> binaries, std::str
 	defines_	= defines;
 }
 
-ProgramBinaries::ProgramBinaries(const char *source_code, size_t source_code_length, std::string defines, std::string program_name) : binaries_({VersionedBinary(source_code, source_code_length, 0, 1, 2)})
+ProgramBinaries::ProgramBinaries(const char *source_code, size_t source_code_length, std::string program_name, std::string defines) : binary_with_lifetime_(std::make_shared<VersionedBinary>(VersionedBinary(source_code, source_code_length, 0, 1, 2))), binaries_({binary_with_lifetime_.get()})
 {
 	static int next_program_id = 0;
 	program_name_ = program_name;
@@ -418,8 +647,13 @@ ProgramBinaries::ProgramBinaries(const char *source_code, size_t source_code_len
 
 const VersionedBinary* ProgramBinaries::getBinary(const std::shared_ptr<OpenCLEngine> &cl) const
 {
+	return getBinary(cl.get());
+}
+
+const VersionedBinary* ProgramBinaries::getBinary(OpenCLEngine *cl) const
+{
 	for (int i = 0; i < binaries_.size(); ++i) {
-		const VersionedBinary* binary = &binaries_[i];
+		const VersionedBinary* binary = binaries_[i];
 
 		if (binary->deviceAddressBits() && binary->deviceAddressBits() != cl->deviceAddressBits())
 			continue;
@@ -433,17 +667,29 @@ const VersionedBinary* ProgramBinaries::getBinary(const std::shared_ptr<OpenCLEn
 		return binary;
 	}
 
-	throw ocl_exception("No SPIR version for " + to_string(cl->deviceAddressBits()) + "-bit device with OpenCL "
-						+ to_string(cl->deviceInfo().opencl_major_version) + "." + to_string(cl->deviceInfo().opencl_minor_version) + "!");
+	throw ocl_exception("No OpenCL/SPIR version for " + to_string(cl->deviceAddressBits()) + "-bit device with OpenCL "
+						+ to_string(cl->deviceInfo().opencl_major_version) + "." + to_string(cl->deviceInfo().opencl_minor_version));
 }
 
-KernelSource::KernelSource(std::shared_ptr<ocl::ProgramBinaries> program, const char *name) : program_(program)
+KernelSource::KernelSource(ocl::ProgramBinaries& program, const char *name) : program_(program)
 {
 	id_		= getNextKernelId();
 	name_	= std::string(name);
 }
 
-KernelSource::KernelSource(std::shared_ptr<ocl::ProgramBinaries> program, const std::string &name) : program_(program)
+KernelSource::KernelSource(ocl::ProgramBinaries& program, const std::string &name) : program_(program)
+{
+	id_		= getNextKernelId();
+	name_	= std::string(name);
+}
+
+KernelSource::KernelSource(std::shared_ptr<ocl::ProgramBinaries> program, const char *name) : program_lifetime_(program), program_(*program)
+{
+	id_		= getNextKernelId();
+	name_	= std::string(name);
+}
+
+KernelSource::KernelSource(std::shared_ptr<ocl::ProgramBinaries> program, const std::string &name) : program_lifetime_(program), program_(*program)
 {
 	id_		= getNextKernelId();
 	name_	= name;
@@ -502,19 +748,19 @@ OpenCLKernel *KernelSource::getKernel(const std::shared_ptr<OpenCLEngine> &cl, b
 	if (kernel)
 		return kernel;
 
-	cl_program program = cl->findProgram(program_->id());
+	cl_program program = cl->findProgram(program_.id());
 
 	if (!program) {
 		Lock lock(cached_kernels_mutex);
 
 		bool verbose = printLog || OCL_VERBOSE_COMPILE_LOG;
 
-		const VersionedBinary* binary = program_->getBinary(cl);
-		const std::vector<unsigned char>* cachedCompiledBinary = getCachedBinary(program_->id(), cl->platform(), cl->device());
+		const VersionedBinary* binary = program_.getBinary(cl);
+		const std::vector<unsigned char>* cachedCompiledBinary = getCachedBinary(program_.id(), cl->platform(), cl->device());
 
 		cl_int ciErrNum = CL_SUCCESS;
 
-		std::string options = program_->defines();
+		std::string options = program_.defines();
 
 		std::vector<unsigned char> loaded_from_file_binaries;
 		std::string binaries_to_load_filename = LOAD_KERNEL_BINARIES_FROM_FILE;
@@ -582,26 +828,25 @@ OpenCLKernel *KernelSource::getKernel(const std::shared_ptr<OpenCLEngine> &cl, b
 		tm.start();
 
 		if (cachedCompiledBinary == NULL && verbose) {
-			if (program_->programName() == "") {
+			if (program_.programName() == "") {
 				std::cout << "Building kernels for " << cl->deviceName() << "... " << std::endl;
 			}
 //			else {
-//				std::cout << "Building kernel " << program_->programName() << " for " << cl->deviceName() << "... " << std::endl;
+//				std::cout << "Building kernel " << program_.programName() << " for " << cl->deviceName() << "... " << std::endl;
 //			}
 		}
 
-		ciErrNum = clBuildProgram(program, 0, NULL, options.c_str(), NULL, NULL);
+		OCL_TRACE(ciErrNum = clBuildProgram(program, 0, NULL, options.c_str(), NULL, NULL));
 
-		if (ciErrNum == CL_SUCCESS && cachedCompiledBinary == NULL) {
-			if (program_->programName() == "" && verbose) {
+		if (ciErrNum == CL_SUCCESS) {
+			if (cachedCompiledBinary == NULL) {
 				std::cout << "Kernels compilation done in " << tm.elapsed() << " seconds" << std::endl;
+			} else {
+				std::cout << "Kernel loaded in " << tm.elapsed() << " seconds" << std::endl;
 			}
-//			else {
-//				std::cout << "Kernel " << program_->programName() << " compilation done in " << tm.elapsed() << " seconds" << std::endl;
-//			}
 
 			std::vector<unsigned char> binaries = getProgramBinaries(program);
-			setCachedBinary(program_->id(), cl->platform(), cl->device(), binaries);
+			setCachedBinary(program_.id(), cl->platform(), cl->device(), binaries);
 		}
 
 		if (ciErrNum != CL_SUCCESS || verbose) {
@@ -613,7 +858,7 @@ OpenCLKernel *KernelSource::getKernel(const std::shared_ptr<OpenCLEngine> &cl, b
 				std::string binaries_string((char*) binaries.data(), binaries.size());
 
 				std::ofstream program_binaries_file;
-				program_binaries_file.open(binaries_filename + "_platform" + to_string(cl->platform()) + "_device" + to_string(cl->device()) + "_program" + to_string(program_->id()));
+				program_binaries_file.open(binaries_filename + "_platform" + to_string(cl->platform()) + "_device" + to_string(cl->device()) + "_program" + to_string(program_.id()));
 
 				program_binaries_file << binaries_string;
 				program_binaries_file.close();
@@ -621,12 +866,12 @@ OpenCLKernel *KernelSource::getKernel(const std::shared_ptr<OpenCLEngine> &cl, b
 		}
 
 		if (ciErrNum != CL_SUCCESS) {
-			clReleaseProgram(program);
+			OCL_SAFE_CALL(clReleaseProgram(program));
 			program = 0;
 		}
 
 		OCL_SAFE_CALL(ciErrNum);
-		cl->programs()[program_->id()] = program;
+		cl->programs()[program_.id()] = program;
 	}
 
 	kernel = new OpenCLKernel;
@@ -635,6 +880,15 @@ OpenCLKernel *KernelSource::getKernel(const std::shared_ptr<OpenCLEngine> &cl, b
 	cl->kernels()[id_] = kernel;
 
 	return kernel;
+}
+
+size_t KernelSource::getMaxWorkgroupSize()
+{
+	gpu::Context context;
+
+	OpenCLKernel *kernel = getKernel(context.cl());
+
+	return kernel->workGroupSize();
 }
 
 void KernelSource::exec(const gpu::WorkSize &ws, const Arg &arg0, const Arg &arg1, const Arg &arg2, const Arg &arg3, const Arg &arg4, const Arg &arg5, const Arg &arg6, const Arg &arg7, const Arg &arg8, const Arg &arg9, const Arg &arg10, const Arg &arg11, const Arg &arg12, const Arg &arg13, const Arg &arg14, const Arg &arg15, const Arg &arg16, const Arg &arg17, const Arg &arg18, const Arg &arg19, const Arg &arg20, const Arg &arg21, const Arg &arg22, const Arg &arg23, const Arg &arg24, const Arg &arg25, const Arg &arg26, const Arg &arg27, const Arg &arg28, const Arg &arg29, const Arg &arg30, const Arg &arg31, const Arg &arg32, const Arg &arg33, const Arg &arg34, const Arg &arg35, const Arg &arg36, const Arg &arg37, const Arg &arg38, const Arg &arg39, const Arg &arg40)
@@ -646,6 +900,17 @@ void KernelSource::exec(const gpu::WorkSize &ws, const Arg &arg0, const Arg &arg
 	kernel->setArgs(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15, arg16, arg17, arg18, arg19, arg20, arg21, arg22, arg23, arg24, arg25, arg26, arg27, arg28, arg29, arg30, arg31, arg32, arg33, arg34, arg35, arg36, arg37, arg38, arg39, arg40);
 
 	context.cl()->ndRangeKernel(*kernel, 3, NULL, ws.clGlobalSize(), ws.clLocalSize());
+}
+
+void KernelSource::execAsynchronized(const gpu::WorkSize &ws, const Arg &arg0, const Arg &arg1, const Arg &arg2, const Arg &arg3, const Arg &arg4, const Arg &arg5, const Arg &arg6, const Arg &arg7, const Arg &arg8, const Arg &arg9, const Arg &arg10, const Arg &arg11, const Arg &arg12, const Arg &arg13, const Arg &arg14, const Arg &arg15, const Arg &arg16, const Arg &arg17, const Arg &arg18, const Arg &arg19, const Arg &arg20, const Arg &arg21, const Arg &arg22, const Arg &arg23, const Arg &arg24, const Arg &arg25, const Arg &arg26, const Arg &arg27, const Arg &arg28, const Arg &arg29, const Arg &arg30, const Arg &arg31, const Arg &arg32, const Arg &arg33, const Arg &arg34, const Arg &arg35, const Arg &arg36, const Arg &arg37, const Arg &arg38, const Arg &arg39, const Arg &arg40)
+{
+	gpu::Context context;
+
+	OpenCLKernel *kernel = getKernel(context.cl());
+
+	kernel->setArgs(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15, arg16, arg17, arg18, arg19, arg20, arg21, arg22, arg23, arg24, arg25, arg26, arg27, arg28, arg29, arg30, arg31, arg32, arg33, arg34, arg35, arg36, arg37, arg38, arg39, arg40);
+
+	context.cl()->ndRangeKernel(*kernel, 3, NULL, ws.clGlobalSize(), ws.clLocalSize(), false);
 }
 
 void KernelSource::execSubdivided(const gpu::WorkSize &ws, const Arg &arg0, const Arg &arg1, const Arg &arg2, const Arg &arg3, const Arg &arg4, const Arg &arg5, const Arg &arg6, const Arg &arg7, const Arg &arg8, const Arg &arg9, const Arg &arg10, const Arg &arg11, const Arg &arg12, const Arg &arg13, const Arg &arg14, const Arg &arg15, const Arg &arg16, const Arg &arg17, const Arg &arg18, const Arg &arg19, const Arg &arg20, const Arg &arg21, const Arg &arg22, const Arg &arg23, const Arg &arg24, const Arg &arg25, const Arg &arg26, const Arg &arg27, const Arg &arg28, const Arg &arg29, const Arg &arg30, const Arg &arg31, const Arg &arg32, const Arg &arg33, const Arg &arg34, const Arg &arg35, const Arg &arg36, const Arg &arg37, const Arg &arg38, const Arg &arg39, const Arg &arg40)
@@ -701,7 +966,7 @@ void KernelSource::execSubdivided(const gpu::WorkSize &ws, const Arg &arg0, cons
 
 				gpu::WorkSize ws_part(local_x, local_y, local_z, current_x, current_y, current_z);
 
-				// NOTTODO: generalize this logic, apply it to CUDA, make so that ndRangeKernel is called only in one place in codebase, remove all get_group_id/get_num_groups calls, etc.
+				// TODO: generalize this logic, apply it to CUDA, make so that ndRangeKernel is called only in one place in codebase, remove all get_group_id/get_num_groups calls, etc.
 				context.cl()->ndRangeKernel(*kernel, 3, offset, ws_part.clGlobalSize(), ws_part.clLocalSize());
 			}
 		}
@@ -725,7 +990,7 @@ OpenCLKernelArg::OpenCLKernelArg(const gpu::shared_device_buffer &arg)
 	cl_mem_storage = arg.clmem();
 	value = &cl_mem_storage;
 	if (arg.cloffset() != 0) {
-		ocl_exception("Offset is not zero, but ignored!");
+		ocl_exception("Offset is not zero, but ignored");
 	}
 }
 
@@ -737,7 +1002,7 @@ OpenCLKernelArg::OpenCLKernelArg(const gpu::shared_device_buffer_typed<T> &arg)
 	cl_mem_storage = arg.clmem();
 	value = &cl_mem_storage;
 	if (arg.cloffset() != 0) {
-		ocl_exception("Offset is not zero, but ignored!");
+		ocl_exception("Offset is not zero, but ignored");
 	}
 }
 

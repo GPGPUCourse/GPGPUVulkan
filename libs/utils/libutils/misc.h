@@ -3,7 +3,7 @@
 #include <libgpu/device.h>
 #include <libgpu/opencl/engine.h>
 #include <libgpu/opencl/device_info.h>
-#include <libutils/string_utils.h>
+#include "libbase/string_utils.h"
 #include <CL/cl.h>
 
 #include <string>
@@ -14,7 +14,8 @@
 namespace gpu {
 	void printDeviceInfo(gpu::Device &device);
 
-	gpu::Device chooseGPUDevice(int argc, char **argv);
+	gpu::Device chooseGPUComputeDevices(int argc, char **argv);
+	gpu::Device chooseGPUVulkanDevices(int argc, char **argv);
 }
 
 namespace ocl {
@@ -32,7 +33,7 @@ namespace ocl {
 		void init(const char *source_code, size_t source_code_length, std::string kernel_name,
 				  std::string defines = std::string())
 		{
-			program_ = std::make_shared<ocl::ProgramBinaries>(source_code, source_code_length, defines);
+			program_ = std::make_shared<ocl::ProgramBinaries>(source_code, source_code_length, kernel_name, defines);
 			kernel_ = std::make_shared<ocl::KernelSource>(program_, kernel_name);
 		}
 

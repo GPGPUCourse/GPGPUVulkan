@@ -39,15 +39,14 @@ void gpu::printDeviceInfo(gpu::Device &device)
 }
 
 
-gpu::Device gpu::chooseGPUDevice(int argc, char **argv)
-{
-	std::vector <gpu::Device> devices = gpu::enumDevices();
+gpu::Device gpu::chooseGPUComputeDevices(int argc, char **argv) {
+	std::vector <gpu::Device> devices = gpu::selectComputeDevices();
 	unsigned int device_index = std::numeric_limits<unsigned int>::max();
 
 	if (devices.size() == 0) {
-		throw std::runtime_error("No OpenCL devices found!");
+		throw std::runtime_error("No GPGPU devices found!");
 	} else {
-		std::cout << "OpenCL devices:" << std::endl;
+		std::cout << "GPGPU devices:" << std::endl;
 		for (int i = 0; i < devices.size(); ++i) {
 			std::cout << "  Device #" << i << ": ";
 			gpu::printDeviceInfo(devices[i]);
@@ -56,13 +55,47 @@ gpu::Device gpu::chooseGPUDevice(int argc, char **argv)
 			device_index = 0;
 		} else {
 			if (argc != 2) {
-				std::cerr << "Usage: <app> <OpenCLDeviceIndex>" << std::endl;
-				std::cerr << "	Where <OpenCLDeviceIndex> should be from 0 to " << (devices.size() - 1) << " (inclusive)" << std::endl;
+				std::cerr << "Usage: <app> <GPGPUDeviceIndex>" << std::endl;
+				std::cerr << "	Where <GPGPUDeviceIndex> should be from 0 to " << (devices.size() - 1) << " (inclusive)" << std::endl;
 				throw std::runtime_error("Illegal arguments!");
 			} else {
 				device_index = atoi(argv[1]);
 				if (device_index >= devices.size()) {
-					std::cerr << "<OpenCLDeviceIndex> should be from 0 to " << (devices.size() - 1) << " (inclusive)! But " << argv[1] << " provided!" << std::endl;
+					std::cerr << "<GPGPUDeviceIndex> should be from 0 to " << (devices.size() - 1) << " (inclusive)! But " << argv[1] << " provided!" << std::endl;
+					throw std::runtime_error("Illegal arguments!");
+				}
+			}
+		}
+		std::cout << "Using device #" << device_index << ": ";
+		gpu::printDeviceInfo(devices[device_index]);
+	}
+	return devices[device_index];
+}
+
+gpu::Device gpu::chooseGPUVulkanDevices(int argc, char **argv)
+{
+	std::vector <gpu::Device> devices = gpu::selectVulkanDevices();
+	unsigned int device_index = std::numeric_limits<unsigned int>::max();
+
+	if (devices.size() == 0) {
+		throw std::runtime_error("No Vulkan devices found!");
+	} else {
+		std::cout << "Vulkan devices:" << std::endl;
+		for (int i = 0; i < devices.size(); ++i) {
+			std::cout << "  Device #" << i << ": ";
+			gpu::printDeviceInfo(devices[i]);
+		}
+		if (devices.size() == 1) {
+			device_index = 0;
+		} else {
+			if (argc != 2) {
+				std::cerr << "Usage: <app> <VulkanDeviceIndex>" << std::endl;
+				std::cerr << "	Where <VulkanDeviceIndex> should be from 0 to " << (devices.size() - 1) << " (inclusive)" << std::endl;
+				throw std::runtime_error("Illegal arguments!");
+			} else {
+				device_index = atoi(argv[1]);
+				if (device_index >= devices.size()) {
+					std::cerr << "<VulkanDeviceIndex> should be from 0 to " << (devices.size() - 1) << " (inclusive)! But " << argv[1] << " provided!" << std::endl;
 					throw std::runtime_error("Illegal arguments!");
 				}
 			}

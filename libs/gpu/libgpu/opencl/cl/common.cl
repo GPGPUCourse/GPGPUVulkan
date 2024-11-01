@@ -4,8 +4,10 @@
 #line 5
 
 #ifdef HOST_CODE
-#include <libclew/CL/cl_platform.h>
-#include <libutils/types.h>
+#define CL_TARGET_OPENCL_VERSION 210
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+
+#include <CL/cl_platform.h>
 #else
 #include "clion_defines.cl"
 #endif
@@ -21,7 +23,7 @@
 #endif
 
 #define assert_isfinite(value) \
-        printf_assert(isfinite(value), "Value should be finite!");
+        printf_assert(isfinite(value), "Value should be finite");
 #endif
 
 #define BOOL_TYPE int
@@ -40,6 +42,7 @@
 	#define tanf tan
 	#define cosf cos
 	#define sinf sin
+	#define sincosf sincos
 	#define atan2f atan2
 	#define atanf atan
 	#define asinf asin
@@ -61,6 +64,7 @@
 	#define max3(x, y, z) (max(max(x, y), z))
 
 	#define cl_float4 float4
+	#define cl_float2 float2
 
 	STATIC_KEYWORD uint3 fetch_uint3(__global const unsigned int* ptr, size_t index)
 	{
@@ -101,31 +105,6 @@
 		ptr[3 * index + 2] = value.z;
 	}
 
-	STATIC_KEYWORD void atomic_add_f32(volatile __global float *address, float value) {
-		float old = value;
-		while ((old = atomic_xchg(address, atomic_xchg(address, 0.0f)+old))!=0.0f);
-	}
-
-	STATIC_KEYWORD float atomic_cmpxchg_f32(volatile __global float *p, float cmp, float val) {
-		union {
-			unsigned int	u32;
-			float			f32;
-		} cmp_union, val_union, old_union;
-
-		cmp_union.f32 = cmp;
-		val_union.f32 = val;
-		old_union.u32 = atomic_cmpxchg((volatile __global unsigned int *) p, cmp_union.u32, val_union.u32);
-		return old_union.f32;
-	}
-
-	STATIC_KEYWORD float atomic_cmpxchg_float(volatile __global float *p, float cmp, float val) {
-		return atomic_cmpxchg_f32(p, cmp, val);
-	}
-
-	STATIC_KEYWORD unsigned int atomic_cmpxchg_uint(volatile __global uint *p, uint cmp, uint val) {
-		return atomic_cmpxchg(p, cmp, val);
-	}
-
 	STATIC_KEYWORD unsigned char rounded_cast_uchar(float value) {
 		return (unsigned char) (value + 0.5f);
 	}
@@ -141,6 +120,8 @@
 	STATIC_KEYWORD float rounded_cast_float(float value) {
 		return value;
 	}
+
+	#define ALIGNED_(x)
 #endif
 
 //______SHARED_STRUCTS__________________________________________________________________________________________________
@@ -151,27 +132,37 @@ typedef struct {
 } Matrix3x3f;
 
 typedef struct {
+	cl_float2 m_row[2];
+} Matrix2x2f;
+
+typedef struct {
 	cl_float4 m_row[4];
 } Matrix4x4f;
 
 //______HOST_CODE_______________________________________________________________________________________________________
 
 #ifdef HOST_CODE
+	inline cl_float2 make_float2(const vector2d &a)
+	{
+		cl_float2 v = {{(float) a.x(), (float) a.y()}};
+		return v;
+	}
+
 	inline cl_float3 make_float3(const vector3d &a)
 	{
-		cl_float3 v = {(float) a.x(), (float) a.y(), (float) a.z()};
+		cl_float3 v = {{(float) a.x(), (float) a.y(), (float) a.z()}};
 		return v;
 	}
 
 	inline cl_float4 make_float4(const vector4d &a)
 	{
-		cl_float4 v = {(float) a.x(), (float) a.y(), (float) a.z(), (float) a.w()};
+		cl_float4 v = {{(float) a.x(), (float) a.y(), (float) a.z(), (float) a.w()}};
 		return v;
 	}
 
 	inline cl_float4 make_float4(float x, float y, float z, float w)
 	{
-		cl_float4 v = {x, y, z, w};
+		cl_float4 v = {{x, y, z, w}};
 		return v;
 	}
 
@@ -193,11 +184,31 @@ typedef struct {
 		m.m_row[3] = make_float4((float) a(3, 0), (float) a(3, 1), (float) a(3, 2), (float) a(3, 3));
 		return m;
 	}
+
+	#if defined(_MSC_VER)
+		#define ALIGNED_(x) __declspec(align(x))
+	#else
+		#if defined(__GNUC__)
+			#define ALIGNED_(x) __attribute__ ((aligned(x)))
+		#else
+			#error cannot specify alignment for platform
+		#endif
+	#endif
 #endif
 
 //______DEVICE_CODE_____________________________________________________________________________________________________
 
 #ifndef HOST_CODE
+
+	STATIC_KEYWORD size_t get_group_id_offsetted(uint dimindx)
+	{
+		return get_global_id(dimindx) / get_local_size(dimindx);
+	}
+
+	STATIC_KEYWORD BOOL_TYPE is_zero(float3 v)
+	{
+		return v.x == 0.0f && v.y == 0.0f && v.z == 0.0f;
+	}
 
 #ifdef DEBUG
 	STATIC_KEYWORD void print_matrix_f3x3(const Matrix3x3f m)
@@ -255,15 +266,15 @@ typedef struct {
 		return m;
 	}
 
-    STATIC_KEYWORD Matrix3x3f mul_f3x3(const Matrix3x3f a, const Matrix3x3f b)
-    {
-        Matrix3x3f bt = transpose_f3x3(b);
-        Matrix3x3f res;
-        res.m_row[0] = make_float4(dot(a.m_row[0], bt.m_row[0]), dot(a.m_row[0], bt.m_row[1]), dot(a.m_row[0], bt.m_row[2]), 0.0f);
-        res.m_row[1] = make_float4(dot(a.m_row[1], bt.m_row[0]), dot(a.m_row[1], bt.m_row[1]), dot(a.m_row[1], bt.m_row[2]), 0.0f);
-        res.m_row[2] = make_float4(dot(a.m_row[2], bt.m_row[0]), dot(a.m_row[2], bt.m_row[1]), dot(a.m_row[2], bt.m_row[2]), 0.0f);
-        return res;
-    }
+	STATIC_KEYWORD Matrix3x3f mul_f3x3(const Matrix3x3f a, const Matrix3x3f b)
+	{
+		Matrix3x3f bt = transpose_f3x3(b);
+		Matrix3x3f res;
+		res.m_row[0] = make_float4(dot(a.m_row[0], bt.m_row[0]), dot(a.m_row[0], bt.m_row[1]), dot(a.m_row[0], bt.m_row[2]), 0.0f);
+		res.m_row[1] = make_float4(dot(a.m_row[1], bt.m_row[0]), dot(a.m_row[1], bt.m_row[1]), dot(a.m_row[1], bt.m_row[2]), 0.0f);
+		res.m_row[2] = make_float4(dot(a.m_row[2], bt.m_row[0]), dot(a.m_row[2], bt.m_row[1]), dot(a.m_row[2], bt.m_row[2]), 0.0f);
+		return res;
+	}
 
 	STATIC_KEYWORD Matrix3x3f mul_f_f3x3(float k, const Matrix3x3f a)
 	{
@@ -340,32 +351,32 @@ typedef struct {
 		return make_float3(m.m_row[0].w, m.m_row[1].w, m.m_row[2].w) * norm;
 	}
 
-    STATIC_KEYWORD Matrix3x3f extract_rotation_f4x4(const Matrix4x4f m)
-    {
-        Matrix3x3f R = make_matrix_f3x3(
-                m.m_row[0].x, m.m_row[0].y, m.m_row[0].z,
-                m.m_row[1].x, m.m_row[1].y, m.m_row[1].z,
-                m.m_row[2].x, m.m_row[2].y, m.m_row[2].z);
+	STATIC_KEYWORD Matrix3x3f extract_rotation_f4x4(const Matrix4x4f m)
+	{
+		Matrix3x3f R = make_matrix_f3x3(
+				m.m_row[0].x, m.m_row[0].y, m.m_row[0].z,
+				m.m_row[1].x, m.m_row[1].y, m.m_row[1].z,
+				m.m_row[2].x, m.m_row[2].y, m.m_row[2].z);
 
-        // matrix4x4f.scale3()
-        Matrix3x3f MtM = mul_f3x3(transpose_f3x3(R), R);
+		// matrix4x4f.scale3()
+		Matrix3x3f MtM = mul_f3x3(transpose_f3x3(R), R);
 
-        float3 d = make_float3(MtM.m_row[0].x, MtM.m_row[1].y, MtM.m_row[2].z);
+		float3 d = make_float3(MtM.m_row[0].x, MtM.m_row[1].y, MtM.m_row[2].z);
 
-        if (d.x > 0) d.x = sqrtf(d.x);
-        if (d.y > 0) d.y = sqrtf(d.y);
-        if (d.z > 0) d.z = sqrtf(d.z);
+		if (d.x > 0) d.x = sqrtf(d.x);
+		if (d.y > 0) d.y = sqrtf(d.y);
+		if (d.z > 0) d.z = sqrtf(d.z);
 
-        float3 s = d;
+		float3 s = d;
 
-        if (s.x) s.x = 1.0f / s.x;
-        if (s.y) s.y = 1.0f / s.y;
-        if (s.z) s.z = 1.0f / s.z;
+		if (s.x) s.x = 1.0f / s.x;
+		if (s.y) s.y = 1.0f / s.y;
+		if (s.z) s.z = 1.0f / s.z;
 
-        return mul_f3x3(R, make_matrix_f3x3(s.x, 0.0f, 0.0f,
-                                            0.0f, s.y, 0.0f,
-                                            0.0f, 0.0f, s.z));
-    }
+		return mul_f3x3(R, make_matrix_f3x3(s.x, 0.0f, 0.0f,
+											0.0f, s.y, 0.0f,
+											0.0f, 0.0f, s.z));
+	}
 
 	STATIC_KEYWORD Matrix4x4f transpose_f4x4(const Matrix4x4f m)
 	{

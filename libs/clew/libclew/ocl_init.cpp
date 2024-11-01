@@ -1,3 +1,6 @@
+#define CL_TARGET_OPENCL_VERSION 210
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+
 #include <CL/cl.h>
 
 #ifdef _WIN32
@@ -74,6 +77,7 @@ typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clSetCommandQueueProperty)	(
 // Memory Object APIs
 
 typedef cl_mem				(CL_API_ENTRY CL_API_CALL * p_pfn_clCreateBuffer)				(cl_context, cl_mem_flags, size_t, void *, cl_int *);
+typedef cl_mem				(CL_API_ENTRY CL_API_CALL * p_pfn_clCreateImage)				(cl_context, cl_mem_flags, const cl_image_format *, const cl_image_desc *, void *, cl_int *);
 typedef cl_mem				(CL_API_ENTRY CL_API_CALL * p_pfn_clCreateImage2D)				(cl_context, cl_mem_flags, const cl_image_format *, size_t, size_t, size_t, void *, cl_int *);
 typedef cl_mem				(CL_API_ENTRY CL_API_CALL * p_pfn_clCreateImage3D)				(cl_context, cl_mem_flags, const cl_image_format *, size_t, size_t, size_t, size_t, size_t, void *, cl_int *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clRetainMemObject)			(cl_mem);
@@ -93,6 +97,7 @@ typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clGetSamplerInfo)				(cl_sam
 
 typedef cl_program			(CL_API_ENTRY CL_API_CALL * p_pfn_clCreateProgramWithSource)	(cl_context, cl_uint, const char **, const size_t *, cl_int *);
 typedef cl_program			(CL_API_ENTRY CL_API_CALL * p_pfn_clCreateProgramWithBinary)	(cl_context, cl_uint, const cl_device_id *, const size_t *, const unsigned char **, cl_int *, cl_int *);
+typedef cl_program			(CL_API_ENTRY CL_API_CALL * p_pfn_clCreateProgramWithIL)		(cl_context, const void *, size_t, cl_int *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clRetainProgram)				(cl_program);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clReleaseProgram)				(cl_program);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clBuildProgram)				(cl_program, cl_uint, const cl_device_id *, const char *, void (CL_CALLBACK *)(cl_program, void *), void *);
@@ -133,11 +138,11 @@ typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueReadBufferRect)		(c
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueWriteBuffer)			(cl_command_queue, cl_mem, cl_bool, size_t, size_t, const void *, cl_uint, const cl_event *, cl_event *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueWriteBufferRect)		(cl_command_queue, cl_mem, cl_bool, const size_t *, const size_t *, const size_t *, size_t, size_t, size_t, size_t, const void *, cl_uint, const cl_event *, cl_event *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueCopyBuffer)			(cl_command_queue, cl_mem, cl_mem, size_t, size_t, size_t, cl_uint, const cl_event *, cl_event *);
-typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueReadImage)			(cl_command_queue, cl_mem, cl_bool, const size_t * [], const size_t * [], size_t, size_t, void *, cl_uint, const cl_event *, cl_event *);
+typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueReadImage)			(cl_command_queue, cl_mem, cl_bool, const size_t *, const size_t *, size_t, size_t, void *, cl_uint, const cl_event *, cl_event *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueWriteImage)			(cl_command_queue, cl_mem, cl_bool, const size_t * [], const size_t * [], size_t, size_t, const void *, cl_uint, const cl_event *, cl_event *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueCopyImage)			(cl_command_queue, cl_mem, cl_mem, const size_t * [], const size_t * [], const size_t * [], cl_uint, const cl_event *, cl_event *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueCopyImageToBuffer)	(cl_command_queue, cl_mem, cl_mem, const size_t * [], const size_t * [], size_t, cl_uint, const cl_event *, cl_event *);
-typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueCopyBufferToImage)	(cl_command_queue, cl_mem, cl_mem, size_t, const size_t * [], const size_t * [], cl_uint, const cl_event *, cl_event *);
+typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueCopyBufferToImage)	(cl_command_queue, cl_mem, cl_mem, size_t, const size_t *, const size_t *, cl_uint, const cl_event *, cl_event *);
 typedef void *				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueMapBuffer)			(cl_command_queue, cl_mem, cl_bool, cl_map_flags, size_t, size_t, cl_uint, const cl_event *, cl_event *, cl_int *);
 typedef void *				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueMapImage)			(cl_command_queue, cl_mem, cl_bool, cl_map_flags, const size_t *, const size_t *, size_t *, size_t *, cl_uint, const cl_event *, cl_event *, cl_int *);
 typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueUnmapMemObject)		(cl_command_queue, cl_mem, void *, cl_uint, const cl_event *, cl_event *);
@@ -157,6 +162,7 @@ typedef cl_int				(CL_API_ENTRY CL_API_CALL * p_pfn_clEnqueueBarrier)				(cl_com
 //
 
 typedef void *				(CL_API_ENTRY CL_API_CALL * p_pfn_clGetExtensionFunctionAddress)(const char *);
+typedef void *				(CL_API_ENTRY CL_API_CALL * p_pfn_clGetExtensionFunctionAddressForPlatform)(cl_platform_id, const char *);
 
 p_pfn_clGetPlatformIDs				pfn_clGetPlatformIDs				= 0;
 p_pfn_clGetPlatformInfo				pfn_clGetPlatformInfo				= 0;
@@ -173,6 +179,7 @@ p_pfn_clReleaseCommandQueue			pfn_clReleaseCommandQueue			= 0;
 p_pfn_clGetCommandQueueInfo			pfn_clGetCommandQueueInfo			= 0;
 p_pfn_clSetCommandQueueProperty		pfn_clSetCommandQueueProperty		= 0;
 p_pfn_clCreateBuffer				pfn_clCreateBuffer					= 0;
+p_pfn_clCreateImage					pfn_clCreateImage					= 0;
 p_pfn_clCreateImage2D				pfn_clCreateImage2D					= 0;
 p_pfn_clCreateImage3D				pfn_clCreateImage3D					= 0;
 p_pfn_clRetainMemObject				pfn_clRetainMemObject				= 0;
@@ -186,6 +193,7 @@ p_pfn_clReleaseSampler				pfn_clReleaseSampler				= 0;
 p_pfn_clGetSamplerInfo				pfn_clGetSamplerInfo				= 0;
 p_pfn_clCreateProgramWithSource		pfn_clCreateProgramWithSource		= 0;
 p_pfn_clCreateProgramWithBinary		pfn_clCreateProgramWithBinary		= 0;
+p_pfn_clCreateProgramWithIL			pfn_clCreateProgramWithIL			= 0;
 p_pfn_clRetainProgram				pfn_clRetainProgram					= 0;
 p_pfn_clReleaseProgram				pfn_clReleaseProgram				= 0;
 p_pfn_clBuildProgram				pfn_clBuildProgram					= 0;
@@ -226,84 +234,142 @@ p_pfn_clEnqueueMarker				pfn_clEnqueueMarker					= 0;
 p_pfn_clEnqueueWaitForEvents		pfn_clEnqueueWaitForEvents			= 0;
 p_pfn_clEnqueueBarrier				pfn_clEnqueueBarrier				= 0;
 p_pfn_clGetExtensionFunctionAddress	pfn_clGetExtensionFunctionAddress	= 0;
+p_pfn_clGetExtensionFunctionAddressForPlatform	pfn_clGetExtensionFunctionAddressForPlatform	= 0;
 
-int ocl_init(void)
+static bool has_ocl_version_1_0 = false;
+static bool has_ocl_version_1_1 = false;
+static bool has_ocl_version_1_2 = false;
+static bool has_ocl_version_2_1 = false;
+
+template <typename T>
+inline void initFuncPtr(const OclLibrary &lib, bool &success, T &func_ptr, const char *name)
 {
-	if (pfn_clGetPlatformIDs) return 1;
+	func_ptr = (T) oclGetProcAddress(lib, name);
+	if (!func_ptr)
+		success = false;
+}
+
+#define INIT_FUNC_PTR(name) initFuncPtr(lib, result, pfn_##name, #name)
+
+bool ocl_init_1_0(const OclLibrary &lib)
+{
+	bool result = true;
+	INIT_FUNC_PTR(clGetPlatformIDs);
+	INIT_FUNC_PTR(clGetPlatformInfo);
+	INIT_FUNC_PTR(clGetDeviceIDs);
+	INIT_FUNC_PTR(clGetDeviceInfo);
+	INIT_FUNC_PTR(clCreateContext);
+	INIT_FUNC_PTR(clCreateContextFromType);
+	INIT_FUNC_PTR(clRetainContext);
+	INIT_FUNC_PTR(clReleaseContext);
+	INIT_FUNC_PTR(clGetContextInfo);
+	INIT_FUNC_PTR(clCreateCommandQueue);
+	INIT_FUNC_PTR(clRetainCommandQueue);
+	INIT_FUNC_PTR(clReleaseCommandQueue);
+	INIT_FUNC_PTR(clGetCommandQueueInfo);
+	INIT_FUNC_PTR(clSetCommandQueueProperty);
+	INIT_FUNC_PTR(clCreateBuffer);
+	INIT_FUNC_PTR(clCreateImage);
+	INIT_FUNC_PTR(clCreateImage2D);
+	INIT_FUNC_PTR(clCreateImage3D);
+	INIT_FUNC_PTR(clRetainMemObject);
+	INIT_FUNC_PTR(clReleaseMemObject);
+	INIT_FUNC_PTR(clGetSupportedImageFormats);
+	INIT_FUNC_PTR(clGetMemObjectInfo);
+	INIT_FUNC_PTR(clGetImageInfo);
+	INIT_FUNC_PTR(clCreateSampler);
+	INIT_FUNC_PTR(clRetainSampler);
+	INIT_FUNC_PTR(clReleaseSampler);
+	INIT_FUNC_PTR(clGetSamplerInfo);
+	INIT_FUNC_PTR(clCreateProgramWithSource);
+	INIT_FUNC_PTR(clCreateProgramWithBinary);
+	INIT_FUNC_PTR(clRetainProgram);
+	INIT_FUNC_PTR(clReleaseProgram);
+	INIT_FUNC_PTR(clBuildProgram);
+	INIT_FUNC_PTR(clUnloadCompiler);
+	INIT_FUNC_PTR(clGetProgramInfo);
+	INIT_FUNC_PTR(clGetProgramBuildInfo);
+	INIT_FUNC_PTR(clCreateKernel);
+	INIT_FUNC_PTR(clCreateKernelsInProgram);
+	INIT_FUNC_PTR(clRetainKernel);
+	INIT_FUNC_PTR(clReleaseKernel);
+	INIT_FUNC_PTR(clSetKernelArg);
+	INIT_FUNC_PTR(clGetKernelInfo);
+	INIT_FUNC_PTR(clGetKernelWorkGroupInfo);
+	INIT_FUNC_PTR(clWaitForEvents);
+	INIT_FUNC_PTR(clGetEventInfo);
+	INIT_FUNC_PTR(clRetainEvent);
+	INIT_FUNC_PTR(clReleaseEvent);
+	INIT_FUNC_PTR(clGetEventProfilingInfo);
+	INIT_FUNC_PTR(clFlush);
+	INIT_FUNC_PTR(clFinish);
+	INIT_FUNC_PTR(clEnqueueReadBuffer);
+	INIT_FUNC_PTR(clEnqueueWriteBuffer);
+	INIT_FUNC_PTR(clEnqueueCopyBuffer);
+	INIT_FUNC_PTR(clEnqueueReadImage);
+	INIT_FUNC_PTR(clEnqueueWriteImage);
+	INIT_FUNC_PTR(clEnqueueCopyImage);
+	INIT_FUNC_PTR(clEnqueueCopyImageToBuffer);
+	INIT_FUNC_PTR(clEnqueueCopyBufferToImage);
+	INIT_FUNC_PTR(clEnqueueMapBuffer);
+	INIT_FUNC_PTR(clEnqueueMapImage);
+	INIT_FUNC_PTR(clEnqueueUnmapMemObject);
+	INIT_FUNC_PTR(clEnqueueNDRangeKernel);
+	INIT_FUNC_PTR(clEnqueueTask);
+	INIT_FUNC_PTR(clEnqueueNativeKernel);
+	INIT_FUNC_PTR(clEnqueueMarker);
+	INIT_FUNC_PTR(clEnqueueWaitForEvents);
+	INIT_FUNC_PTR(clEnqueueBarrier);
+	INIT_FUNC_PTR(clGetExtensionFunctionAddress);
+	return result;
+}
+
+bool ocl_init_1_1(const OclLibrary &lib)
+{
+	bool result = true;
+	INIT_FUNC_PTR(clEnqueueReadBufferRect);
+	INIT_FUNC_PTR(clEnqueueWriteBufferRect);
+	return result;
+}
+
+bool ocl_init_1_2(const OclLibrary &lib)
+{
+	bool result = true;
+	INIT_FUNC_PTR(clGetExtensionFunctionAddressForPlatform);
+	return result;
+}
+
+bool ocl_init_2_1(const OclLibrary &lib)
+{
+	bool result = true;
+	INIT_FUNC_PTR(clCreateProgramWithIL);
+	return result;
+}
+
+bool ocl_init()
+{
+	if (pfn_clGetPlatformIDs)
+		return true;
 
 	OclLibrary lib = oclLoadLibrary();
-	if (!lib) return 0;
+	if (!lib)
+		return false;
 
-	pfn_clGetPlatformIDs				= (p_pfn_clGetPlatformIDs)				oclGetProcAddress(lib, "clGetPlatformIDs");
-	pfn_clGetPlatformInfo				= (p_pfn_clGetPlatformInfo)				oclGetProcAddress(lib, "clGetPlatformInfo");
-	pfn_clGetDeviceIDs					= (p_pfn_clGetDeviceIDs)				oclGetProcAddress(lib, "clGetDeviceIDs");
-	pfn_clGetDeviceInfo					= (p_pfn_clGetDeviceInfo)				oclGetProcAddress(lib, "clGetDeviceInfo");
-	pfn_clCreateContext					= (p_pfn_clCreateContext)				oclGetProcAddress(lib, "clCreateContext");
-	pfn_clCreateContextFromType			= (p_pfn_clCreateContextFromType)		oclGetProcAddress(lib, "clCreateContextFromType");
-	pfn_clRetainContext					= (p_pfn_clRetainContext)				oclGetProcAddress(lib, "clRetainContext");
-	pfn_clReleaseContext				= (p_pfn_clReleaseContext)				oclGetProcAddress(lib, "clReleaseContext");
-	pfn_clGetContextInfo				= (p_pfn_clGetContextInfo)				oclGetProcAddress(lib, "clGetContextInfo");
-	pfn_clCreateCommandQueue			= (p_pfn_clCreateCommandQueue)			oclGetProcAddress(lib, "clCreateCommandQueue");
-	pfn_clRetainCommandQueue			= (p_pfn_clRetainCommandQueue)			oclGetProcAddress(lib, "clRetainCommandQueue");
-	pfn_clReleaseCommandQueue			= (p_pfn_clReleaseCommandQueue)			oclGetProcAddress(lib, "clReleaseCommandQueue");
-	pfn_clGetCommandQueueInfo			= (p_pfn_clGetCommandQueueInfo)			oclGetProcAddress(lib, "clGetCommandQueueInfo");
-	pfn_clSetCommandQueueProperty		= (p_pfn_clSetCommandQueueProperty)		oclGetProcAddress(lib, "clSetCommandQueueProperty");
-	pfn_clCreateBuffer					= (p_pfn_clCreateBuffer)				oclGetProcAddress(lib, "clCreateBuffer");
-	pfn_clCreateImage2D					= (p_pfn_clCreateImage2D)				oclGetProcAddress(lib, "clCreateImage2D");
-	pfn_clCreateImage3D					= (p_pfn_clCreateImage3D)				oclGetProcAddress(lib, "clCreateImage3D");
-	pfn_clRetainMemObject				= (p_pfn_clRetainMemObject)				oclGetProcAddress(lib, "clRetainMemObject");
-	pfn_clReleaseMemObject				= (p_pfn_clReleaseMemObject)			oclGetProcAddress(lib, "clReleaseMemObject");
-	pfn_clGetSupportedImageFormats		= (p_pfn_clGetSupportedImageFormats)	oclGetProcAddress(lib, "clGetSupportedImageFormats");
-	pfn_clGetMemObjectInfo				= (p_pfn_clGetMemObjectInfo)			oclGetProcAddress(lib, "clGetMemObjectInfo");
-	pfn_clGetImageInfo					= (p_pfn_clGetImageInfo)				oclGetProcAddress(lib, "clGetImageInfo");
-	pfn_clCreateSampler					= (p_pfn_clCreateSampler)				oclGetProcAddress(lib, "clCreateSampler");
-	pfn_clRetainSampler					= (p_pfn_clRetainSampler)				oclGetProcAddress(lib, "clRetainSampler");
-	pfn_clReleaseSampler				= (p_pfn_clReleaseSampler)				oclGetProcAddress(lib, "clReleaseSampler");
-	pfn_clGetSamplerInfo				= (p_pfn_clGetSamplerInfo)				oclGetProcAddress(lib, "clGetSamplerInfo");
-	pfn_clCreateProgramWithSource		= (p_pfn_clCreateProgramWithSource)		oclGetProcAddress(lib, "clCreateProgramWithSource");
-	pfn_clCreateProgramWithBinary		= (p_pfn_clCreateProgramWithBinary)		oclGetProcAddress(lib, "clCreateProgramWithBinary");
-	pfn_clRetainProgram					= (p_pfn_clRetainProgram)				oclGetProcAddress(lib, "clRetainProgram");
-	pfn_clReleaseProgram				= (p_pfn_clReleaseProgram)				oclGetProcAddress(lib, "clReleaseProgram");
-	pfn_clBuildProgram					= (p_pfn_clBuildProgram)				oclGetProcAddress(lib, "clBuildProgram");
-	pfn_clUnloadCompiler				= (p_pfn_clUnloadCompiler)				oclGetProcAddress(lib, "clUnloadCompiler");
-	pfn_clGetProgramInfo				= (p_pfn_clGetProgramInfo)				oclGetProcAddress(lib, "clGetProgramInfo");
-	pfn_clGetProgramBuildInfo			= (p_pfn_clGetProgramBuildInfo)			oclGetProcAddress(lib, "clGetProgramBuildInfo");
-	pfn_clCreateKernel					= (p_pfn_clCreateKernel)				oclGetProcAddress(lib, "clCreateKernel");
-	pfn_clCreateKernelsInProgram		= (p_pfn_clCreateKernelsInProgram)		oclGetProcAddress(lib, "clCreateKernelsInProgram");
-	pfn_clRetainKernel					= (p_pfn_clRetainKernel)				oclGetProcAddress(lib, "clRetainKernel");
-	pfn_clReleaseKernel					= (p_pfn_clReleaseKernel)				oclGetProcAddress(lib, "clReleaseKernel");
-	pfn_clSetKernelArg					= (p_pfn_clSetKernelArg)				oclGetProcAddress(lib, "clSetKernelArg");
-	pfn_clGetKernelInfo					= (p_pfn_clGetKernelInfo)				oclGetProcAddress(lib, "clGetKernelInfo");
-	pfn_clGetKernelWorkGroupInfo		= (p_pfn_clGetKernelWorkGroupInfo)		oclGetProcAddress(lib, "clGetKernelWorkGroupInfo");
-	pfn_clWaitForEvents					= (p_pfn_clWaitForEvents)				oclGetProcAddress(lib, "clWaitForEvents");
-	pfn_clGetEventInfo					= (p_pfn_clGetEventInfo)				oclGetProcAddress(lib, "clGetEventInfo");
-	pfn_clRetainEvent					= (p_pfn_clRetainEvent)					oclGetProcAddress(lib, "clRetainEvent");
-	pfn_clReleaseEvent					= (p_pfn_clReleaseEvent)				oclGetProcAddress(lib, "clReleaseEvent");
-	pfn_clGetEventProfilingInfo			= (p_pfn_clGetEventProfilingInfo)		oclGetProcAddress(lib, "clGetEventProfilingInfo");
-	pfn_clFlush							= (p_pfn_clFlush)						oclGetProcAddress(lib, "clFlush");
-	pfn_clFinish						= (p_pfn_clFinish)						oclGetProcAddress(lib, "clFinish");
-	pfn_clEnqueueReadBuffer				= (p_pfn_clEnqueueReadBuffer)			oclGetProcAddress(lib, "clEnqueueReadBuffer");
-	pfn_clEnqueueReadBufferRect			= (p_pfn_clEnqueueReadBufferRect)		oclGetProcAddress(lib, "clEnqueueReadBufferRect");
-	pfn_clEnqueueWriteBuffer			= (p_pfn_clEnqueueWriteBuffer)			oclGetProcAddress(lib, "clEnqueueWriteBuffer");
-	pfn_clEnqueueWriteBufferRect		= (p_pfn_clEnqueueWriteBufferRect)		oclGetProcAddress(lib, "clEnqueueWriteBufferRect");
-	pfn_clEnqueueCopyBuffer				= (p_pfn_clEnqueueCopyBuffer)			oclGetProcAddress(lib, "clEnqueueCopyBuffer");
-	pfn_clEnqueueReadImage				= (p_pfn_clEnqueueReadImage)			oclGetProcAddress(lib, "clEnqueueReadImage");
-	pfn_clEnqueueWriteImage				= (p_pfn_clEnqueueWriteImage)			oclGetProcAddress(lib, "clEnqueueWriteImage");
-	pfn_clEnqueueCopyImage				= (p_pfn_clEnqueueCopyImage)			oclGetProcAddress(lib, "clEnqueueCopyImage");
-	pfn_clEnqueueCopyImageToBuffer		= (p_pfn_clEnqueueCopyImageToBuffer)	oclGetProcAddress(lib, "clEnqueueCopyImageToBuffer");
-	pfn_clEnqueueCopyBufferToImage		= (p_pfn_clEnqueueCopyBufferToImage)	oclGetProcAddress(lib, "clEnqueueCopyBufferToImage");
-	pfn_clEnqueueMapBuffer				= (p_pfn_clEnqueueMapBuffer)			oclGetProcAddress(lib, "clEnqueueMapBuffer");
-	pfn_clEnqueueMapImage				= (p_pfn_clEnqueueMapImage)				oclGetProcAddress(lib, "clEnqueueMapImage");
-	pfn_clEnqueueUnmapMemObject			= (p_pfn_clEnqueueUnmapMemObject)		oclGetProcAddress(lib, "clEnqueueUnmapMemObject");
-	pfn_clEnqueueNDRangeKernel			= (p_pfn_clEnqueueNDRangeKernel)		oclGetProcAddress(lib, "clEnqueueNDRangeKernel");
-	pfn_clEnqueueTask					= (p_pfn_clEnqueueTask)					oclGetProcAddress(lib, "clEnqueueTask");
-	pfn_clEnqueueNativeKernel			= (p_pfn_clEnqueueNativeKernel)			oclGetProcAddress(lib, "clEnqueueNativeKernel");
-	pfn_clEnqueueMarker					= (p_pfn_clEnqueueMarker)				oclGetProcAddress(lib, "clEnqueueMarker");
-	pfn_clEnqueueWaitForEvents			= (p_pfn_clEnqueueWaitForEvents)		oclGetProcAddress(lib, "clEnqueueWaitForEvents");
-	pfn_clEnqueueBarrier				= (p_pfn_clEnqueueBarrier)				oclGetProcAddress(lib, "clEnqueueBarrier");
-	pfn_clGetExtensionFunctionAddress	= (p_pfn_clGetExtensionFunctionAddress)	oclGetProcAddress(lib, "clGetExtensionFunctionAddress");
+	has_ocl_version_1_0 = ocl_init_1_0(lib);
+	has_ocl_version_1_1 = ocl_init_1_1(lib);
+	has_ocl_version_1_2 = ocl_init_1_2(lib);
+	has_ocl_version_2_1 = ocl_init_2_1(lib);
+	return true;
+}
 
-	return 1;
+bool ocl_version_1_2()
+{
+	return has_ocl_version_1_2;
+}
+
+bool ocl_version_2_1()
+{
+	return has_ocl_version_2_1;
 }
 
 // Platform API
@@ -473,6 +539,19 @@ clCreateBuffer(cl_context   context,
 }
 
 extern CL_API_ENTRY cl_mem CL_API_CALL
+clCreateImage(cl_context              context,
+                cl_mem_flags            flags,
+                const cl_image_format * image_format,
+                const cl_image_desc *   image_desc,
+                void *                  host_ptr,
+                cl_int *                errcode_ret) CL_API_SUFFIX__VERSION_1_2
+{
+	if (!pfn_clCreateImage) return 0;
+
+	return pfn_clCreateImage(context, flags, image_format, image_desc, host_ptr, errcode_ret);
+}
+
+extern CL_API_ENTRY cl_mem CL_API_CALL
 clCreateImage2D(cl_context              context,
                 cl_mem_flags            flags,
                 const cl_image_format * image_format,
@@ -625,6 +704,17 @@ clCreateProgramWithBinary(cl_context                     context,
 	if (!pfn_clCreateProgramWithBinary) return 0;
 
 	return pfn_clCreateProgramWithBinary(context, num_devices, device_list, lengths, binaries, binary_status, errcode_ret);
+}
+
+extern CL_API_ENTRY cl_program CL_API_CALL
+clCreateProgramWithIL(cl_context             context,
+                      const void *           il,
+                      size_t                 length,
+                      cl_int *               errcode_ret) CL_API_SUFFIX__VERSION_2_1
+{
+	if (!pfn_clCreateProgramWithIL) return 0;
+
+	return pfn_clCreateProgramWithIL(context, il, length, errcode_ret);
 }
 
 extern CL_API_ENTRY cl_int CL_API_CALL
@@ -926,8 +1016,8 @@ extern CL_API_ENTRY cl_int CL_API_CALL
 clEnqueueReadImage(cl_command_queue     command_queue,
                    cl_mem               image,
                    cl_bool              blocking_read, 
-                   const size_t *       origin[3],
-                   const size_t *       region[3],
+                   const size_t *       origin,
+                   const size_t *       region,
                    size_t               row_pitch,
                    size_t               slice_pitch, 
                    void *               ptr,
@@ -995,8 +1085,8 @@ clEnqueueCopyBufferToImage(cl_command_queue command_queue,
                            cl_mem           src_buffer,
                            cl_mem           dst_image, 
                            size_t           src_offset,
-                           const size_t *   dst_origin[3],
-                           const size_t *   region[3], 
+                           const size_t *   dst_origin,
+                           const size_t *   region, 
                            cl_uint          num_events_in_wait_list,
                            const cl_event * event_wait_list,
                            cl_event *       event) CL_API_SUFFIX__VERSION_1_0
@@ -1139,4 +1229,11 @@ extern CL_API_ENTRY void * CL_API_CALL clGetExtensionFunctionAddress(const char 
 	if (!pfn_clGetExtensionFunctionAddress) return 0;
 
 	return pfn_clGetExtensionFunctionAddress(func_name);
+}
+
+extern CL_API_ENTRY void * CL_API_CALL clGetExtensionFunctionAddressForPlatform(cl_platform_id platform, const char * func_name) CL_API_SUFFIX__VERSION_1_2
+{
+	if (!pfn_clGetExtensionFunctionAddressForPlatform) return 0;
+
+	return pfn_clGetExtensionFunctionAddressForPlatform(platform, func_name);
 }

@@ -1,10 +1,15 @@
 #pragma once
 
-#include <stdexcept>
+#define CL_TARGET_OPENCL_VERSION 210
+#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+
+#include "exceptions.h"
+#include "libbase/string_utils.h"
+#include <libgpu/device.h>
+#include <libgpu/utils.h>
 #include <CL/cl.h>
 #include <CL/cl_ext.h>
-#include <libutils/string_utils.h>
-#include <libgpu/utils.h>
+#include <stdexcept>
 
 namespace ocl {
 
@@ -21,34 +26,40 @@ namespace ocl {
 #define CL_DEVICE_PCI_SLOT_ID_NV						0x4009
 #endif
 
+typedef union
+{
+	struct {
+		cl_uint type;
+		cl_uint data[5];
+	} raw;
+	struct {
+		cl_uint type;
+		cl_char unused[17];
+		cl_char bus;
+		cl_char device;
+		cl_char function;
+	} pcie;
+} cl_device_topology_amd;
+
+#ifndef CL_DEVICE_TOPOLOGY_AMD
 #define CL_DEVICE_TOPOLOGY_AMD							0x4037
+#endif
+
+#ifndef CL_DEVICE_BOARD_NAME_AMD
 #define CL_DEVICE_BOARD_NAME_AMD						0x4038
+#endif
+
+#ifndef CL_DEVICE_GLOBAL_FREE_MEMORY_AMD
 #define CL_DEVICE_GLOBAL_FREE_MEMORY_AMD				0x4039
+#endif
+
+#ifndef CL_DEVICE_WAVEFRONT_WIDTH_AMD
 #define CL_DEVICE_WAVEFRONT_WIDTH_AMD					0x4043
-
-enum VENDOR {
-	ID_AMD		= 0x1002,
-	ID_INTEL	= 0x8086,
-	ID_NVIDIA	= 0x10de,
-};
-
-class ocl_exception : public gpu::gpu_exception {
-public:
-	ocl_exception(std::string msg) throw ()					: gpu_exception(msg)							{	}
-	ocl_exception(const char *msg) throw ()					: gpu_exception(msg)							{	}
-	ocl_exception() throw ()								: gpu_exception("OpenCL exception")				{	}
-};
-
-class ocl_bad_alloc : public gpu::gpu_bad_alloc {
-public:
-	ocl_bad_alloc(std::string msg) throw ()					: gpu_bad_alloc(msg)							{	}
-	ocl_bad_alloc(const char *msg) throw ()					: gpu_bad_alloc(msg)							{	}
-	ocl_bad_alloc() throw ()								: gpu_bad_alloc("OpenCL exception")				{	}
-};
+#endif
 
 std::string errorString(cl_int code);
 
-static inline void reportError(cl_int err, int line, std::string prefix="")
+static inline void reportError(cl_int err, int line, const std::string &prefix = std::string())
 {
 	if (CL_SUCCESS == err)
 		return;
@@ -63,7 +74,18 @@ static inline void reportError(cl_int err, int line, std::string prefix="")
 	}
 }
 
-#define OCL_SAFE_CALL(expr)  ocl::reportError(expr, __LINE__, "")
-#define OCL_SAFE_CALL_MESSAGE(expr, message)  ocl::reportError(expr, __LINE__, message)
+#define OCL_SAFE_CALL(expr) ocl::reportError(expr, __LINE__, "")
+#define OCL_SAFE_CALL_MESSAGE(expr, message) ocl::reportError(expr, __LINE__, message)
+#define OCL_TRACE(expr) expr;
+
+#define OCL_NOTHROW(expr) \
+{ \
+	try { \
+		expr; \
+	} \
+	catch (std::exception &e) { \
+		std::cerr << "Error: " << e.what() << std::endl; \
+	} \
+}
 
 }

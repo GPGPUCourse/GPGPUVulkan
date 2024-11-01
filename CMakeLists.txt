@@ -1,15 +1,25 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
+
+project(GPGPUVulkan)
+
+set(CMAKE_CXX_STANDARD 17)
 
 option(GPU_CUDA_SUPPORT "CUDA support." ON)
 
-add_subdirectory(libs)
+if (NOT DEFINED GLSLC_BIN)
+    set (GLSLC_BIN glslc)
+    message (STATUS "Vulkan glslc compiler from system PATH will be used")
+else ()
+    message (STATUS "Vulkan glslc compiler is specified")
+endif ()
 
-project(GPGPUSpeedupGuidelines)
-
-set(CMAKE_CXX_STANDARD 11)
+# GTest позволяет писать удобные unit-test-ы
+find_package(GTest REQUIRED)
+set (GTEST_LIBRARIES GTest::gtest)
+set (GTEST_MAIN_LIBRARIES GTest::gtest_main)
+set (GTEST_BOTH_LIBRARIES ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES})
 
 # OpenMP позволит распараллеливать циклы на все ядра процессора простыми директивами
-
 find_package(OpenMP)
 if (OpenMP_CXX_FOUND)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
@@ -18,27 +28,44 @@ else()
     message(WARNING "OpenMP not found!")
 endif()
 
-# convertIntoHeader CMake-функция объявлена в libs/gpu/CMakeLists.txt:71
-# Она считывает все байты из файла src/cl/aplusb.cl (т.е. весь исходный код кернела) и преобразует их в массив байтов в файле src/cl/aplusb_cl.h aplusb_kernel
+add_subdirectory(libs)
+
+set(HEADERS
+        src/utils/happly.h
+        src/utils/read_ply_with_uv.h
+        src/vk/kernels.h
+)
+
+set(SOURCES
+        src/utils/read_ply_with_uv.cpp
+        src/vk/kernels.cpp
+)
+
+set(LIBRARIES
+        libclew
+        libgpu
+        libutils
+)
+
+# compile_vulkan CMake-функция объявлена в libs/gpu/libgpu/vulkan/CMakeLists.txt:97
+# Она считывает все байты из файла src/vk/100_aplusb.comp (т.е. весь исходный код кернела), компилирует с помощью glslc компилятора (в т.ч. выполняя все include)
+# Скомпилированный SPIR байткод находится в файле src/vk/generated_kernels/100_aplusb_comp_spirv_vulkan.spir
+# SPIR байткод можно проанализировать через рефлексию - /usr/local/bin/spirv-reflect src/vk/generated_kernels/100_aplusb_comp_spirv_vulkan.spir
+# Затем получившийся скомпилированный SPIR байткод преобразует в массив байтов в файле src/vk/generated_kernels/100_aplusb_comp_spirv_vulkan.h
+# (чтобы не нужно было в runtime читать шейдер/байткод с диска, чтобы был монолитный исполняемый файл)
 # Обратите внимание что это происходит на этапе компиляции, кроме того необходимо чтобы файл src/cl/aplusb_cl.h был перечислен среди исходников для компиляции при вызове add_executable
-convertIntoHeader(src/cl/01_aplusb.cl src/cl/01_aplusb_cl.h aplusb_sources)
-convertIntoHeader(src/cl/52_sum.cl src/cl/52_sum_cl.h sum_sources)
-convertIntoHeader(src/cl/53_sum_local_reduction.cl src/cl/53_sum_local_reduction_cl.h sum_local_reduction_sources)
+set(VULKAN_DEFINES)
+compile_vulkan(HEADERS src/vk/100_aplusb.comp               VULKAN_DEFINES)
+compile_vulkan(HEADERS src/vk/110_render_triangle.vert      VULKAN_DEFINES)
+compile_vulkan(HEADERS src/vk/111_render_triangle.frag      VULKAN_DEFINES)
+compile_vulkan(HEADERS src/vk/120_gnome_min_max.comp        VULKAN_DEFINES)
+compile_vulkan(HEADERS src/vk/121_render_gnome.vert         VULKAN_DEFINES)
+compile_vulkan(HEADERS src/vk/122_render_gnome.frag         VULKAN_DEFINES)
 
-if (GPU_CUDA_SUPPORT)
-    find_package(CUDA REQUIRED)
-    add_definitions(-DCUDA_SUPPORT)
-    set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -lineinfo)
-    cuda_add_executable(main01_aplusb src/main01_aplusb.cpp src/cl/01_aplusb_cl.h src/cu/01_aplusb.cu)
-    cuda_add_executable(main52_sum src/main52_sum.cpp src/cl/52_sum_cl.h src/cu/52_sum.cu)
-    cuda_add_executable(main53_sum_local_reduction src/main53_sum_local_reduction.cpp src/cl/53_sum_local_reduction_cl.h src/cu/53_sum_local_reduction.cu)
-else()
-    message(WARNING "CUDA not found!")
-    add_executable(main01_aplusb src/main01_aplusb.cpp src/cl/01_aplusb_cl.h)
-    add_executable(main52_sum src/main52_sum.cpp src/cl/52_sum_cl.h)
-    add_executable(main53_sum_local_reduction src/main53_sum_local_reduction.cpp src/cl/53_sum_local_reduction_cl.h)
-endif()
+add_executable       (100_main_aplusb                       src/100_main_aplusb.cpp             ${SOURCES} ${HEADERS})
+add_executable       (110_main_render_triangle              src/110_main_render_triangle.cpp    ${SOURCES} ${HEADERS})
+add_executable       (120_main_render_gnome                 src/120_main_render_gnome.cpp       ${SOURCES} ${HEADERS})
 
-target_link_libraries(main01_aplusb libclew libgpu libutils)
-target_link_libraries(main52_sum libclew libgpu libutils)
-target_link_libraries(main53_sum_local_reduction libclew libgpu libutils)
+target_link_libraries(100_main_aplusb                       ${LIBRARIES})
+target_link_libraries(110_main_render_triangle              ${LIBRARIES})
+target_link_libraries(120_main_render_gnome                 ${LIBRARIES})

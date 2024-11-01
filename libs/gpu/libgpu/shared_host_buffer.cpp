@@ -1,3 +1,5 @@
+#define _SHORT_FILE_ "shared_host_buffer.cpp"
+
 #include "shared_host_buffer.h"
 #include "context.h"
 #include <algorithm>
@@ -23,7 +25,12 @@ shared_host_buffer::shared_host_buffer()
 
 shared_host_buffer::~shared_host_buffer()
 {
-	decref();
+	try {
+		decref();
+	}
+	catch (std::exception &e) {
+		std::cerr << "Error: " << e.what() << std::endl;
+	}
 }
 
 shared_host_buffer::shared_host_buffer(const shared_host_buffer &other)
@@ -92,14 +99,14 @@ void shared_host_buffer::decref()
 	switch (type_) {
 #ifdef CUDA_SUPPORT
 	case Context::TypeCUDA:
-		cudaFreeHost(data_);
+		CUDA_SAFE_CALL(cudaFreeHost(data_));
 		break;
 #endif
 	case Context::TypeOpenCL:
 		free(data_);
 		break;
 	default:
-		gpu::raiseException(__FILE__, __LINE__, "No GPU context!");
+		gpu::raiseException(_SHORT_FILE_, __LINE__, "No GPU context");
 	}
 
 	delete [] buffer_;
@@ -148,14 +155,14 @@ void shared_host_buffer::resize(size_t size)
 		break;
 #endif
 	case Context::TypeOpenCL:
-		// NOTTODO: implement pinned memory in opencl
+		// TODO: implement pinned memory in opencl
 		// currently we use a plain paged memory buffer
 		data_ = malloc(size);
 		if (!data_)
 			throw std::bad_alloc();
 		break;
 	default:
-		gpu::raiseException(__FILE__, __LINE__, "No GPU context!");
+		gpu::raiseException(_SHORT_FILE_, __LINE__, "No GPU context");
 	}
 
 	type_ = type;

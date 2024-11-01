@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.1)
+cmake_minimum_required(VERSION 3.5)
 
 project(libclew)
 
@@ -9,6 +9,7 @@ set(HEADERS
         CL/cl_gl.h
         CL/cl_gl_ext.h
         CL/cl_platform.h
+        CL/cl_version.h
         CL/opencl.h
         libclew/ocl_init.h
         )

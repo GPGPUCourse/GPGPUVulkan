@@ -152,3 +152,15 @@ void write(void* data_cpu, avk2::raii::BufferData vk_data_gpu, size_t size) {
 ```Упражнение 610``` А что если бы у критической доли пользователей не был поддержан ```VK_EXT_shader_atomic_float``` (т.е. ```atomicAddFloat(ptr, value)```)? Посмотрите в ```atomic_add.comp``` случай когда ```USE_NATIVE_ATOMIC_ADD_FLOAT``` выключен. Посмотрите в ```atomic.vk```.
 
 ```Упражнение 611``` А почему это макросы, а не функции?
+
+### 7) Разные графические эффекты/оптимизации
+
+```Упражнение 701``` Как реализовать ```frustum-culling```? Т.е. как ускорить отрисовку за счет выкидывания того что точно не в ракурсе камеры? (например за спиной игрока)
+
+```Упражнение 702``` Как это сделать еще эффективнее если мы сделали что-то вроде группировки треугольников в ```кластеры``` по 128 штук как в ```Nanite```?
+
+```Упражнение 703``` Как добиться вот таких графических эффектов? Попробуйте сделать это с гномом.
+
+![Pokemon outline contour graphics effect](/.github/images/21_pokemon_contour.jpg?raw=true)
+
+![RTS unit under mouse highligh selection](.github/images/22_rts_unit_highlight_contour.jpg)

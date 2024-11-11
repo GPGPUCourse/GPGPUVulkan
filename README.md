@@ -1,3 +1,7 @@
+# Видеозапись лекции (две части)
+
+<a href="https://www.youtube.com/watch?v=LbyUK7qZHx8"><img src="https://raw.githubusercontent.com/GPGPUCourse/GPGPUVulkan/master/.github/images/vulkan_lecture.jpg" alt="Youtube lecture about Vulkan API" width="32%"/></a> <a href="https://www.youtube.com/watch?v=lzmm-8Kcn6Y"><img src="https://raw.githubusercontent.com/GPGPUCourse/GPGPUVulkan/master/.github/images/vulkan_lecture2.jpg" alt="Youtube lecture about Vulkan API" width="32%"/></a>
+
 # Графический пайплайн на GPU (Vulkan/OpenGL)
 
 ![Vulkan GPU pipeline visualization](/.github/images/01_gpu_pipeline.png?raw=true)

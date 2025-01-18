@@ -9,4 +9,6 @@ namespace avk2 {
 
 	const ProgramBinaries&				get120GnomeMinMax();
 	std::vector<const ProgramBinaries*>	get121RenderGnome();
+
+	const ProgramBinaries&				get130FidelityFXSharpening();
 }

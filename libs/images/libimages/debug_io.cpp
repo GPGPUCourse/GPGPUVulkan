@@ -415,6 +415,17 @@ image8u debug_io::depthMapping(const image32f &depth, float nodata_value, bool f
 	return img;
 }
 
+image8u debug_io::upscaleNearestNeighbor(const image8u &image, int k) {
+	image8u upscaled_image(k * image.width(), k * image.height(), image.channels());
+	#pragma omp parallel for
+	LOOP_XY(upscaled_image) {
+		for (int c = 0; c < upscaled_image.channels(); ++c) {
+			upscaled_image(y, x, c) = image(y / k, x / k, c);
+		}
+	}
+	return upscaled_image;
+}
+
 std::tuple<std::vector<point3f>, std::vector<point3u>> debug_io::representTexmappingAs3DModel(
 		const std::vector<point2f> &texmapping_vertices, const std::vector<point4u> &texmapping_faces, size_t atlas_size)
 {

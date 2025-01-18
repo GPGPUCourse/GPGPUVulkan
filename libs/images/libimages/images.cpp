@@ -97,7 +97,7 @@ ImageWindow AnyImage::show(const char *title) const {
 
 void AnyImage::saveJPEG(const char *const filename, int quality) const {
 	if (type() == DataType8u) this->toCImg<unsigned char>().img->save_jpeg(filename, quality);
-	throwUnsupportedDataType(type());
+	else throwUnsupportedDataType(type());
 }
 
 void AnyImage::saveJPEG(const std::string& filename, int quality) const {
@@ -106,7 +106,7 @@ void AnyImage::saveJPEG(const std::string& filename, int quality) const {
 
 void AnyImage::savePNG(const char *const filename) const {
 	if (type() == DataType8u) this->toCImg<unsigned char>().img->save_png(filename);
-	throwUnsupportedDataType(type());
+	else throwUnsupportedDataType(type());
 }
 
 void AnyImage::savePNG(const std::string& filename) const {
@@ -327,6 +327,24 @@ void waitAllWindows(std::vector<ImageWindow> windows) {
 			break;
 		}
 	}
+}
+
+bool isAnyWindowClosed(std::vector<ImageWindow> windows) {
+	for (size_t i = 0; i < windows.size(); ++i) {
+		if (windows[i].isClosed()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool isEscapePressed(std::vector<ImageWindow> windows, unsigned int milliseconds) {
+	for (size_t i = 0; i < windows.size(); ++i) {
+		if (windows[i].wait(milliseconds) == getEscapeKeyCode()) {
+			return true;
+		}
+	}
+	return false;
 }
 
 mouse_click_t ImageWindow::getMouseClick() {

@@ -4,50 +4,70 @@ https://gpuopen.com/fidelityfx-cas/
 https://www.shadertoy.com/view/ftsXzM
 Potentially useful to upscale under-resolution renders.
 
-This is a slimmed down reimplementation based on the paper.
-
-Best viewed in fullscreen.
-Drag left right to change switchover position. CAS on left.
-Drag up and down to set CAS level.
+This is an adapted version from WebGL shader on shadertoy - https://www.shadertoy.com/view/ftsXzM
 */
+#version 450
 
-void mainImage( out vec4 fragColor, in vec2 fragCoord )
-{
-    // Normalized pixel coordinates (from 0 to 1)
-    vec2 uv = fragCoord/iResolution.xy;
-    vec2 muv;
-    if (iMouse.z > 0.) {
-        muv = iMouse.xy/iResolution.xy;
-    } else {
-        muv = vec2(.5+.3*sin(iTime*.3),.5);
+#include "defines.h"
+
+layout(push_constant) uniform PushConstants {
+    int     width;
+    int     height;
+    int     mouseX;
+    float   time;
+    float   CASLevel;
+} params;
+
+#define SPEED_OF_VERTICAL_LINE 3.0f
+
+layout(binding = 0)     uniform				sampler2DArray	iChannel0;
+layout(binding = 1, R8)	uniform writeonly	image2DArray	outputImage;
+
+layout(local_size_x = VK_GROUP_SIZE_X, local_size_y = VK_GROUP_SIZE_Y) in;
+
+#define textureFrom2DArray(image, xy) vec3(texture(image, vec3(xy, 0)).x, texture(image, vec3(xy, 1)).x, texture(image, vec3(xy, 2)).x)
+
+void main() {
+    ivec2 fragCoord = ivec2(gl_GlobalInvocationID.xy);
+    if (fragCoord.x >= params.width || fragCoord.y >= params.height) {
+        return;
     }
-  
+
+    // Normalized pixel coordinates (from 0 to 1)
+    vec2 uv = vec2(fragCoord)/vec2(params.width, params.height);
+    vec2 muv;
+    if (params.mouseX >= 0) {
+        muv = vec2(params.mouseX*1.0/params.width, 0.5);
+    } else {
+        muv = vec2(0.5+0.3*sin(params.time*SPEED_OF_VERTICAL_LINE), 0.5);
+    }
+
     // Time varying pixel color
-    vec3 col = texture(iChannel0, uv).xyz;
+    vec3 col = textureFrom2DArray(iChannel0, uv).xyz;
 
     // CAS algorithm
     float max_g = col.y;
     float min_g = col.y;
-    vec4 uvoff = vec4(1,0,1,-1)/iChannelResolution[0].xxyy;
+    vec4 uvoff = vec4(1,0,1,-1)/vec4(params.width, params.width, params.height, params.height);
     vec3 colw;
-    vec3 col1 = texture(iChannel0, uv+uvoff.yw).xyz;
+    vec3 col1 = textureFrom2DArray(iChannel0, uv+uvoff.yw).xyz;
     max_g = max(max_g, col1.y);
     min_g = min(min_g, col1.y);
     colw = col1;
-    col1 = texture(iChannel0, uv+uvoff.xy).xyz;
+    col1 = textureFrom2DArray(iChannel0, uv+uvoff.xy).xyz;
     max_g = max(max_g, col1.y);
     min_g = min(min_g, col1.y);
     colw += col1;
-    col1 = texture(iChannel0, uv+uvoff.yz).xyz;
+    col1 = textureFrom2DArray(iChannel0, uv+uvoff.yz).xyz;
     max_g = max(max_g, col1.y);
     min_g = min(min_g, col1.y);
     colw += col1;
-    col1 = texture(iChannel0, uv-uvoff.xy).xyz;
+    col1 = textureFrom2DArray(iChannel0, uv-uvoff.xy).xyz;
     max_g = max(max_g, col1.y);
     min_g = min(min_g, col1.y);
     colw += col1;
     float d_min_g = min_g;
-    float d_max_g = 1.-max_g;
+    float d_max_g = 1.0-max_g;
     float A;
     if (d_max_g < d_min_g) {
         A = d_max_g / max_g;
@@ -55,15 +75,18 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
         A = d_min_g / max_g;
     }
     A = sqrt(A);
-    A *= mix(-.125, -.2, muv.y);
-    vec3 col_out = (col + colw * A) / (1.+4.*A);
-    if (uv.x > (muv.x-.002)) {
-        if (uv.x > (muv.x+.002)) {
+    A *= mix(-0.125, -0.2, params.CASLevel);
+
+    vec3 col_out = (col + colw * A) / (1.0+4.0*A);
+    if (uv.x > (muv.x-0.002)) {
+        if (uv.x > (muv.x+0.002)) {
             col_out = col;
         } else {
-            col_out = vec3(0);
+            col_out = vec3(0.0);
         }
     }
     // Output to screen
-    fragColor = vec4(col_out,1);
+    for (int c = 0; c < 3; ++c) {
+        imageStore(outputImage, ivec3(fragCoord, c), vec4(col_out[c]));
+    }
 }

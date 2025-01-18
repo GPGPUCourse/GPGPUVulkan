@@ -73,6 +73,9 @@ protected:
 // wait all windows until Escape is pressed or all windows were closed
 void waitAllWindows(std::vector<ImageWindow> windows);
 
+bool isAnyWindowClosed(std::vector<ImageWindow> windows);
+bool isEscapePressed(std::vector<ImageWindow> windows, unsigned int milliseconds=10);
+
 class AnyImage {
 public:
     AnyImage();

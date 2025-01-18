@@ -36,6 +36,8 @@ namespace debug_io {
 
 	image8u		depthMapping(const image32f &depth, float nodata_value = std::numeric_limits<float>::max(), bool force = false);
 
+	image8u		upscaleNearestNeighbor(const image8u &image, int k);
+
 	// note that input faces are point4u: {v0, v1, v2, pageId}
 	vertices_and_faces_t	representTexmappingAs3DModel(const std::vector<point2f> &texmapping_vertices, const std::vector<point4u> &texmapping_faces, size_t atlas_size); // returns vertices+faces (can be saved via dumpModel(...))
 

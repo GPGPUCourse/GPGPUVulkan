@@ -34,7 +34,7 @@ void main() {
     }
 
     // Normalized pixel coordinates (from 0 to 1)
-    vec2 uv = vec2(fragCoord)/vec2(params.width, params.height);
+    vec2 uv = (vec2(fragCoord)+vec2(0.5, 0.5))/vec2(params.width, params.height);
     vec2 muv;
     if (params.mouseX >= 0) {
         muv = vec2(params.mouseX*1.0/params.width, 0.5);

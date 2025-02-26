@@ -59,7 +59,8 @@ make -j$njobs install
 cd ../..
 rm -rf Vulkan-Loader-${vulkan_loader_version}
 
-mv vk_mem_alloc.h ${install_prefix}/include/vk_mem_alloc.h
+mkdir ${install_prefix}/include/vma
+mv vk_mem_alloc.h ${install_prefix}/include/vma/vk_mem_alloc.h
 
 echo "Installing glslc shaders compiler"
 unzip v2020.2.zip

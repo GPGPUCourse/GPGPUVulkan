@@ -30,5 +30,5 @@ find_package(Threads REQUIRED)
 
 add_library(${PROJECT_NAME} ${SOURCES} ${HEADERS})
 
-target_link_libraries(${PROJECT_NAME} Threads::Threads)
+target_link_libraries(${PROJECT_NAME} Threads::Threads ${GTEST_BOTH_LIBRARIES} ${CMAKE_DL_LIBS})
 target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR})

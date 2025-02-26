@@ -135,7 +135,7 @@ vk::raii::Instance avk2::createInstance(const vk::raii::Context &context, bool e
 		auto supported_validation_layers_versions = {"1.3.280.0", "1.3.283.0"};
 		for (std::string vulkan_sdk_version: supported_validation_layers_versions) {
 			default_layer_dir = "C:\\VulkanSDK\\" + vulkan_sdk_version + "\\Bin\\";
-			if (filesystem::folderexists(default_layer_dir))
+			if (std::filesystem::exists(default_layer_dir))
 				break;
 		}
 #elif defined(__APPLE__)

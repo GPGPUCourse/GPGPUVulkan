@@ -10,8 +10,7 @@
 #define VK_MAX_FRAGMENT_OUTPUT_ATTACHMENTS_USED		(VK_MAX_NCHANNELS + 1) // required in texturing shader that enblends VK_MAX_NCHANNELS+1=(camera image)+(camera weight) outputs into atlas
 #define VK_MAX_IMAGE_ARRAY_LAYERS_USED				20 // required in texturing shader that aggregates 20 best similarities from all neighbors
 
-// TODO make auto-subdivision of Vulkan kernels executions and lower VK_MAX_COMPUTE_WORK_GROUP_COUNT requirements to smaller values (16384x16384x16384) to add Intel(R) Graphics (RPL-S) support
-#define VK_MAX_COMPUTE_WORK_GROUP_COUNT_X			524288 // f.e. in aplusb_test.cpp we launch 100*1000*1000/256=390625 workgroups, but on Intel(R) Graphics (RPL-S) it fails with "vkCmdDispatch(): groupCountX (390625) exceeds device limit maxComputeWorkGroupCount[0] (65535)."
+#define VK_MAX_COMPUTE_WORK_GROUP_COUNT_X			32768 // thanks to automatic subdivision - we can run even large compute workloads on GPU with any workgroup count limit
 #define VK_MAX_COMPUTE_WORK_GROUP_COUNT_Y			16384
 #define VK_MAX_COMPUTE_WORK_GROUP_COUNT_Z			16384
 

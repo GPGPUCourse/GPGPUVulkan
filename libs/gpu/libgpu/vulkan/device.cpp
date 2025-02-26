@@ -80,13 +80,6 @@ bool avk2::Device::init(const vk::raii::Instance &instance, bool silent)
 	}
 	max_image_dimension_2d = prop.limits.maxImageDimension2D;
 	if (prop.limits.maxComputeWorkGroupCount[0] < VK_MAX_COMPUTE_WORK_GROUP_COUNT_X || prop.limits.maxComputeWorkGroupCount[1] < VK_MAX_COMPUTE_WORK_GROUP_COUNT_Y || prop.limits.maxComputeWorkGroupCount[2] < VK_MAX_COMPUTE_WORK_GROUP_COUNT_Z) {
-		// f.e. in aplusb_test.cpp we launch 100*1000*1000/256=390625 workgroups, but on Intel(R) Graphics (RPL-S) it fails with "vkCmdDispatch(): groupCountX (390625) exceeds device limit maxComputeWorkGroupCount[0] (65535)."
-		// but this is pretty nice, because otherwise usage of this device fails
-		// because Intel(R) Graphics (RPL-S) declares VK_EXT_shader_atomic_float support, but it is broken:
-		// VKF.vkCreateDebugUtilsMessengerEXT(*instance_context->instance(), &vk_create_info, nullptr, &debug_messenger)
-		// Vulkan debug callback triggered with VkPhysicalDeviceShaderAtomicFloatFeaturesEXT.shaderBufferFloat32AtomicAdd not supported (VK_ERROR_FEATURE_NOT_PRESENT)
-		// Vulkan debug callback triggered with terminator_CreateDevice: Failed in ICD /usr/lib/x86_64-linux-gnu/libvulkan_intel.so vkCreateDevice call
-		// Vulkan debug callback triggered with vkCreateDevice:  Failed to create device chain.
 		if (!silent) std::cout << "Vulkan device " << name << " skipped: too small max compute workgroup count "
 			<< prop.limits.maxComputeWorkGroupCount[0] << "x" << prop.limits.maxComputeWorkGroupCount[1] << "x" << prop.limits.maxComputeWorkGroupCount[1]
 			<<" (at least " << VK_MAX_COMPUTE_WORK_GROUP_COUNT_X << "x" << VK_MAX_COMPUTE_WORK_GROUP_COUNT_Y << "x" << VK_MAX_COMPUTE_WORK_GROUP_COUNT_Z << " required)" << std::endl;

@@ -1160,6 +1160,11 @@ avk2::VulkanKernel *avk2::KernelSource::compileComputeKernel(const std::shared_p
 	compute_pipeline_create_info.setLayout(pipeline_layout);
 	compute_pipeline_create_info.setStage(pipeline_stages_create_info);
 
+    // To make possible automatic subdivision of workload (i.e. to use dispatchBase(baseGroup, groupCount)),
+    // i.e. to prevent validation error:
+    // If any of baseGroupX (123456), baseGroupY (0), or baseGroupZ (0) are not zero, then the bound compute pipeline must have been created with the VK_PIPELINE_CREATE_DISPATCH_BASE flag
+    compute_pipeline_create_info.setFlags(vk::PipelineCreateFlagBits::eDispatchBase);
+
 	VulkanKernel *kernel = new VulkanKernel(compute_program->programName());
 //		vk::raii::PipelineCache pipeline_cache = vk->getDevice().createPipelineCache(vk::PipelineCacheCreateInfo()); // TODO use pipeline caching
 	vk::raii::Pipeline pipeline = vk->getDevice().createComputePipeline(nullptr, compute_pipeline_create_info);
@@ -1346,7 +1351,8 @@ void avk2::KernelSource::exec(const PushConstant &params, const gpu::WorkSize &w
 	for (size_t d = 0; d < 3; ++d) {
 		rassert(spirv_group_size[d] == ws.vkGroupSize()[d], 151466595490051);
 	}
-	command_buffer.dispatch(ws.vkGroupCount()[0], ws.vkGroupCount()[1], ws.vkGroupCount()[2]);
+
+	dispatchAutoSubdivided(command_buffer, ws);
 
 	command_buffer.end();
 	last_exec_prepairing_time_ = total_t.elapsed();
@@ -1370,6 +1376,44 @@ void avk2::KernelSource::exec(const PushConstant &params, const gpu::WorkSize &w
 	}
 
 	last_exec_total_time_ = total_t.elapsed();
+}
+
+void avk2::KernelSource::dispatchAutoSubdivided(const vk::raii::CommandBuffer &command_buffer, const gpu::WorkSize &ws) const {
+#if 0
+    // trivial implementation running the whole workload in once
+    command_buffer.dispatch(ws.vkGroupCount()[0], ws.vkGroupCount()[1], ws.vkGroupCount()[2]);
+#else
+    // TODO if device supports larget work group count limits - it can be better to use them
+    const size_t WORK_GROUP_COUNT_LIMITS[3] = {VK_MAX_COMPUTE_WORK_GROUP_COUNT_X, VK_MAX_COMPUTE_WORK_GROUP_COUNT_Y, VK_MAX_COMPUTE_WORK_GROUP_COUNT_Z};
+    size_t passes_by_axis[3];
+    size_t work_group_count_by_axis[3];
+    for (size_t d = 0; d < 3; ++d) {
+        passes_by_axis[d] = div_ceil(ws.vkGroupCount()[d], WORK_GROUP_COUNT_LIMITS[d]);
+        work_group_count_by_axis[d] = div_ceil(ws.vkGroupCount()[d], passes_by_axis[d]);
+    }
+
+    for (size_t pass_z = 0; pass_z < passes_by_axis[2]; ++pass_z) {
+        for (size_t pass_y = 0; pass_y < passes_by_axis[1]; ++pass_y) {
+            for (size_t pass_x = 0; pass_x < passes_by_axis[0]; ++pass_x) {
+
+                size_t pass_index[3] = {pass_x, pass_y, pass_z};
+                size_t group_offset[3];
+                size_t group_count[3];
+
+                for (size_t d = 0; d < 3; ++d) {
+                    size_t from = pass_index[d] * work_group_count_by_axis[d];
+                    size_t to = std::min((pass_index[d] + 1) * work_group_count_by_axis[d], ws.vkGroupCount()[d]);
+                    group_offset[d] = from;
+                    group_count[d] = to - from;
+                    rassert(group_count[d] <= WORK_GROUP_COUNT_LIMITS[d], 9234512354654362);
+                }
+
+                command_buffer.dispatchBase(group_offset[0], group_offset[1], group_offset[2],
+                                            group_count[0], group_count[1], group_count[2]);
+            }
+        }
+    }
+#endif
 }
 
 avk2::RenderBuilder avk2::KernelSource::initRender(size_t width, size_t height)

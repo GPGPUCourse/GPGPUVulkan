@@ -309,8 +309,5 @@ void avk2::Device::printInfo()
 	} else {
 		std::cout << ", " << (mem_size >> 20) << " MB global memory";
 	}
-	std::cout << ", Vulkan API " << api_version << std::endl;
-
-	std::cout << "  driver version: " << driver_version << std::endl;
-	std::cout << "  max work group size " << max_workgroup_size << std::endl;
+	std::cout << ", Vulkan API " << api_version << ", driver version: " << driver_version << std::endl;
 }

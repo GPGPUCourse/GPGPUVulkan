@@ -51,6 +51,24 @@ namespace stats {
 		return percentile(values, 50);
 	}
 
+    template<typename T>
+    T standardDeviation(const std::vector<T> &values) {
+        if (values.empty()) {
+            return (T) 0;
+        }
+
+        const T mean = avg(values);
+
+        T sum_of_squares = 0;
+        for (const T& value : values) {
+            const T deviation = value - mean;
+            sum_of_squares += deviation * deviation;
+        }
+
+        const T variance = sum_of_squares / values.size();
+        return std::sqrt(variance);
+    }
+
 	template<typename T>
 	T max(const std::vector<T> &values) {
 		if (values.size() == 0)

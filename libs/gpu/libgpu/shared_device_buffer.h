@@ -181,6 +181,14 @@ protected:
 
 class Vertex3D : public VertexGeneric<3, 0, 0> {
 public:
+    Vertex3D() : VertexGeneric() {
+        init(0, 0, 0);
+    }
+
+    Vertex3D(float x, float y, float z) : VertexGeneric() {
+        init(x, y, z);
+    }
+
 	void init(float x, float y, float z) {
 		// location = 0
 		this->positionAttribute(0) = x;
@@ -191,6 +199,14 @@ public:
 
 class Vertex3DUV : public VertexGeneric<3, 2, 0> {
 public:
+    Vertex3DUV() : VertexGeneric() {
+        init(0, 0, 0, 0, 0);
+    }
+
+    Vertex3DUV(float x, float y, float z, float u, float v) : VertexGeneric() {
+        init(x, y, z, u, v);
+    }
+
 	void init(float x, float y, float z, float u, float v) {
 		// location = 0
 		this->positionAttribute(0) = x;

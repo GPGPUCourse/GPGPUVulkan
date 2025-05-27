@@ -6,8 +6,8 @@
 #include <libbase/timer.h>
 
 #include "libimages/debug_io.h"
-#include "vk/kernels.h"
-#include "vk/defines.h"
+#include "kernels/vk/kernels.h"
+#include "kernels/vk/defines.h"
 
 
 int main(int argc, char **argv)

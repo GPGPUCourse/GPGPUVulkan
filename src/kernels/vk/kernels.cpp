@@ -1,6 +1,8 @@
 #include "kernels.h"
 
 #include "generated_kernels/100_aplusb_comp.h"
+#include "generated_kernels/101_reduce_max_comp.h"
+#include "generated_kernels/105_merge_sort_comp.h"
 #include "generated_kernels/110_render_triangle_vert.h"
 #include "generated_kernels/111_render_triangle_frag.h"
 #include "generated_kernels/120_gnome_min_max_comp.h"
@@ -12,6 +14,14 @@ namespace avk2 {
 	const ProgramBinaries& get100AplusB() {
 		return vulkan_binaries_100_aplusb_comp;
 	}
+
+    const ProgramBinaries& get101ReduceMax() {
+        return vulkan_binaries_101_reduce_max_comp;
+    }
+
+    const ProgramBinaries& get105MergeSort() {
+        return vulkan_binaries_105_merge_sort_comp;
+    }
 
 	std::vector<const ProgramBinaries*> get110RenderTriangle() {
 		return {&vulkan_binaries_110_render_triangle_vert, &vulkan_binaries_111_render_triangle_frag};

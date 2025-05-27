@@ -1,0 +1,134 @@
+#version 450
+
+#include <libgpu/vulkan/vk/common.vk>
+#include <libgpu/vulkan/vk/limits.vk>
+
+#include "defines.h"
+
+layout(std430, binding = 0) readonly  buffer InputBuffer  { float sorted_chunks_k[];  };
+layout(std430, binding = 1) writeonly buffer OutputBuffer { float sorted_chunks_2k[]; };
+
+layout(push_constant) uniform PushConstants {
+    uint n;
+    uint sorted_k;
+} params;
+
+layout(local_size_x = VK_GROUP_SIZE) in;
+
+uint binarySearch(float value, uint from_inclusive, uint to_exclusive, bool is_left_side_search) {
+    rassert(from_inclusive < to_exclusive, 3324236543);
+    bool is_right_side_search = !is_left_side_search;
+
+    // see https://neerc.ifmo.ru/wiki/index.php?title=%D0%A6%D0%B5%D0%BB%D0%BE%D1%87%D0%B8%D1%81%D0%BB%D0%B5%D0%BD%D0%BD%D1%8B%D0%B9_%D0%B4%D0%B2%D0%BE%D0%B8%D1%87%D0%BD%D1%8B%D0%B9_%D0%BF%D0%BE%D0%B8%D1%81%D0%BA
+    int l = int(from_inclusive) - 1;
+    int r = int(to_exclusive);
+
+    int steps = 0;
+    while (l < r - 1) {
+        int m = (l + r) / 2;
+        float mValue = sorted_chunks_k[m];
+        if ((is_left_side_search && mValue < value) || (is_right_side_search && mValue <= value)) {
+            l = m;
+        } else {
+            r = m;
+        }
+        ++steps;
+        rassert(steps < 100, 74328957);
+        if (steps >= 100) break;
+    }
+
+    uint index = is_left_side_search ? r : l;
+#if DEBUG_PRINTF_EXT_ENABLED
+    debugPrintfEXT("[from, to)=[%d, %d) value=%f -> index=%d l=%d r=%d global_id=%d is_left_side_search=%d\n", from_inclusive, to_exclusive, value, index, l, r, gl_GlobalInvocationID.x, is_left_side_search);
+#endif
+
+    // let's check that result index is OK
+    if (index >= from_inclusive && index < to_exclusive) {
+        if (is_right_side_search) {
+            if (!(sorted_chunks_k[index] <= value)) {
+#if DEBUG_PRINTF_EXT_ENABLED
+                debugPrintfEXT("failed global_id=%d\n", gl_GlobalInvocationID.x);
+#endif
+            }
+            rassert(sorted_chunks_k[index] <= value, 942412321);
+            if (index + 1 < to_exclusive) {
+                rassert(sorted_chunks_k[index + 1] > value, 964904923);
+            }
+        } else {
+            if (!(sorted_chunks_k[index] >= value)) {
+#if DEBUG_PRINTF_EXT_ENABLED
+                debugPrintfEXT("failed global_id=%d\n", gl_GlobalInvocationID.x);
+#endif
+            }
+            rassert(sorted_chunks_k[index] >= value, 442412321);
+            if (index > from_inclusive) {
+                rassert(sorted_chunks_k[index - 1] < value, 564904923);
+            }
+        }
+    }
+
+    return index;
+}
+
+void main() {
+    uint global_id  = gl_GlobalInvocationID.x;
+    if (global_id >= params.n)
+        return;
+
+    // Input sorted_chunks_k:
+    // [               chunk_double 0       ] [        chunk_double 1  ] ...
+    // [     chunk a    ] [     chunk b     ] [        chunk a   ] [...] ...
+    // [0...sorted...k-1] [k...sorted...2k-1] [2k...sorted...3k-1] [...] ...
+    //                                        ▲            ▲       ▲
+    //                                        │        global_id   │
+    //                                        │                    │
+    //                                      chunk              chunk_pair
+    //
+    // Output sorted_chunks_2k:
+    // [           output chunk_double 0    ] [  output chunk_double 1 ] ...
+    //                                        ▲                     ▲
+    //                                        │               output_index
+    //                            output_chunk_double_offset
+
+    float value = sorted_chunks_k[global_id];
+
+    uint chunk_size = params.sorted_k;
+
+    uint chunk = global_id / chunk_size;
+    bool is_chunk_left = (chunk % 2 == 0);
+    uint chunk_pair = is_chunk_left ? (chunk + 1) : (chunk - 1);
+
+    uint chunk_offset = chunk * chunk_size;
+    uint chunk_pair_offset = chunk_pair * chunk_size;
+
+    bool is_left_side_search = is_chunk_left;
+    //            right side + 1
+    //            ┌───────────┐
+    //            │           │
+    //      left side         │
+    //      ┌─────┼────────┐  │
+    //      │     │        │  │
+    //      ▲     ▼        ▼  ▲
+    //  [1  2  2  3]   [0  2  2  4]
+    //      ▼                 ▼
+    //      └───┐        ┌────┘
+    //          │        │
+    //          ▼        ▼
+    //    0  1  2  2  2  2  3  4
+
+    // How many elements in output array before our value?
+    // elements before our value in our chunk:
+    uint elements_before_in_chunk = global_id - chunk_offset;
+    // elements before our value in pair chunk (the one which values are merged with our chunk values):
+    uint elements_before_in_paired_chunk = chunk_pair_offset >= params.n ? 0 : binarySearch(value, chunk_pair_offset, min(params.n, chunk_pair_offset + chunk_size), is_left_side_search) - chunk_pair_offset;
+    if (!is_left_side_search) {
+        elements_before_in_paired_chunk += 1;
+    }
+
+    uint chunk_double = chunk / 2;
+    uint output_chunk_pair_offset = (2 * chunk_size) * chunk_double;
+    uint output_index = output_chunk_pair_offset + elements_before_in_chunk + elements_before_in_paired_chunk;
+
+    rassert(output_index < params.n, 892413412);
+    sorted_chunks_2k[output_index] = value;
+}

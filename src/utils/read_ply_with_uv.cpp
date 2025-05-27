@@ -21,7 +21,7 @@ std::tuple<std::vector<point3f>, std::vector<point2f>, std::vector<point3u>> loa
 	std::vector<std::vector<size_t>> facesIndices = plyIn.getFaceIndices();
 
 	for (auto xyz: verticesXYZ) {
-		vertices_xyz.push_back({xyz[0], xyz[1], xyz[2]});
+		vertices_xyz.push_back({(float) xyz[0], (float) xyz[1], (float) xyz[2]});
 	}
 	rassert(verticesU.size() == verticesV.size(), 324142213411);
 	for (size_t i = 0; i < verticesU.size(); ++i) {

@@ -33,12 +33,12 @@ add_subdirectory(libs)
 set(HEADERS
         src/utils/happly.h
         src/utils/read_ply_with_uv.h
-        src/vk/kernels.h
+        src/kernels/vk/kernels.h
 )
 
 set(SOURCES
         src/utils/read_ply_with_uv.cpp
-        src/vk/kernels.cpp
+        src/kernels/vk/kernels.cpp
 )
 
 set(LIBRARIES
@@ -55,20 +55,26 @@ set(LIBRARIES
 # (чтобы не нужно было в runtime читать шейдер/байткод с диска, чтобы был монолитный исполняемый файл)
 # Обратите внимание что это происходит на этапе компиляции, кроме того необходимо чтобы файл src/cl/aplusb_cl.h был перечислен среди исходников для компиляции при вызове add_executable
 set(VULKAN_DEFINES)
-compile_vulkan(HEADERS src/vk/100_aplusb.comp                       VULKAN_DEFINES)
-compile_vulkan(HEADERS src/vk/110_render_triangle.vert              VULKAN_DEFINES)
-compile_vulkan(HEADERS src/vk/111_render_triangle.frag              VULKAN_DEFINES)
-compile_vulkan(HEADERS src/vk/120_gnome_min_max.comp                VULKAN_DEFINES)
-compile_vulkan(HEADERS src/vk/121_render_gnome.vert                 VULKAN_DEFINES)
-compile_vulkan(HEADERS src/vk/122_render_gnome.frag                 VULKAN_DEFINES)
-compile_vulkan(HEADERS src/vk/130_fildelity_fx_cas_sharpening.comp  VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/100_aplusb.comp VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/101_reduce_max.comp VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/105_merge_sort.comp VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/110_render_triangle.vert VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/111_render_triangle.frag VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/120_gnome_min_max.comp VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/121_render_gnome.vert VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/122_render_gnome.frag VULKAN_DEFINES)
+compile_vulkan(HEADERS src/kernels/vk/130_fildelity_fx_cas_sharpening.comp VULKAN_DEFINES)
 
 add_executable       (100_main_aplusb                       src/100_main_aplusb.cpp                     ${SOURCES} ${HEADERS})
+add_executable       (101_main_max                          src/101_main_max.cpp                        ${SOURCES} ${HEADERS})
+add_executable       (105_main_merge_sort                   src/105_main_merge_sort.cpp                 ${SOURCES} ${HEADERS})
 add_executable       (110_main_render_triangle              src/110_main_render_triangle.cpp            ${SOURCES} ${HEADERS})
 add_executable       (120_main_render_gnome                 src/120_main_render_gnome.cpp               ${SOURCES} ${HEADERS})
 add_executable       (130_main_fidelity_fx_sharpening       src/130_main_fidelity_fx_sharpening.cpp     ${SOURCES} ${HEADERS})
 
 target_link_libraries(100_main_aplusb                       ${LIBRARIES})
+target_link_libraries(101_main_max                          ${LIBRARIES})
+target_link_libraries(105_main_merge_sort                   ${LIBRARIES})
 target_link_libraries(110_main_render_triangle              ${LIBRARIES})
 target_link_libraries(120_main_render_gnome                 ${LIBRARIES})
 target_link_libraries(130_main_fidelity_fx_sharpening       ${LIBRARIES})

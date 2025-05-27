@@ -14,3 +14,10 @@
 
 Finally, CMake options should look similar to this:
 -DCMAKE_TOOLCHAIN_FILE=C:\Users\<USERNAME>\.vcpkg-clion\vcpkg\scripts\buildsystems\vcpkg.cmake -DGLSLC_BIN=C:\VulkanSDK\1.3.283.0\Bin\glslc.exe -DSPIR_CLANG_BIN="C:\Program Files\LLVM\bin\clang.exe" -DCMAKE_PREFIX_PATH="C:\VulkanSDK\1.3.283.0"
+
+You can run unit-tests (run libgpu_test target) to ensure that everything works fine (it takes around 2 minutes for release build on 4090).
+
+To fix support for jpeg images ("Failed to recognize format of file '....jpg'", "'gm.exe' is not recognized as an internal or external command"):
+
+7) Install https://sourceforge.net/projects/graphicsmagick/files/graphicsmagick-binaries/1.3.45/GraphicsMagick-1.3.45-Q8-win64-dll.exe/download (ensure that checkbox "Update executable search path" is enabled)
+    Don't forget to re-launch CLion/IDE so that gm.exe will be seen in PATH variable.

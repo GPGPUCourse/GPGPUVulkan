@@ -115,3 +115,5 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${install_prefix} ..
 make -j$njobs install
 cd ../..
 rm -rf SPIRV-Reflect-vulkan-sdk-${vulkan_spirv_reflect_version}.0
+
+# You can run unit-tests (run libgpu_test target) to ensure that everything works fine (it takes around 2 minutes for release build on 4090).

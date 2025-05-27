@@ -1,0 +1,22 @@
+#version 450
+
+#include <libgpu/vulkan/vk/common.vk>
+
+layout (std430, binding = 0) readonly	buffer AsIn		{	uint as[];	};
+layout (std430, binding = 1) readonly	buffer BsIn		{	uint bs[];	};
+layout (std430, binding = 2) writeonly	buffer CsOut	{	uint cs[];	};
+
+layout (push_constant) uniform PushConstants {
+	uint n;
+} params;
+
+layout(local_size_x = 256) in;
+
+void main() {
+	const uint index = gl_GlobalInvocationID.x;
+	if (index >= params.n)
+		return;
+
+	cs[index] = as[index] + bs[index];
+}
+

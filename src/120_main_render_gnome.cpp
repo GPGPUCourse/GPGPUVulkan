@@ -6,8 +6,8 @@
 #include <libbase/timer.h>
 
 #include "libimages/debug_io.h"
-#include "vk/kernels.h"
-#include "vk/defines.h"
+#include "kernels/vk/kernels.h"
+#include "kernels/vk/defines.h"
 
 #include "utils/read_ply_with_uv.h"
 
@@ -43,6 +43,14 @@ int main(int argc, char **argv)
 	gpu::gpu_mem_vertices_xyz_uv	vertices_gpu(vertices_with_uv.size());
 	gpu::gpu_mem_faces_indices		faces_gpu(faces.size());
 
+    // Фиктивный прямоугольник который провоцирует запуск фрагментного шейдера для каждого пикселя экрана (чтобы оттуда выполнить трассировку каждого луча)
+    std::vector<gpu::Vertex3D>  screen_rect_vertices = {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}};
+    std::vector<point3u>        screen_rect_faces = {{0, 1, 2}, {0, 2, 3}};
+    gpu::gpu_mem_vertices_xyz   screen_rect_vertices_gpu(4);
+    gpu::gpu_mem_faces_indices  screen_rect_faces_gpu(2);
+    screen_rect_vertices_gpu.writeN(screen_rect_vertices.data(), screen_rect_vertices.size());
+    screen_rect_faces_gpu.writeN(screen_rect_faces.data(), screen_rect_faces.size());
+
 	rassert(texture.channels() == 3, 123412451325423);
 	gpu::gpu_mem_32f				min_max_values_gpu(6);
 	gpu_image8u						texture_gpu(texture.width(), texture.height(), 3);
@@ -59,6 +67,7 @@ int main(int argc, char **argv)
 	// Запускаем кернел (несколько раз и с замером времени выполнения)
 	avk2::KernelSource kernel_gnome_min_max(avk2::get120GnomeMinMax());
 	avk2::KernelSource kernel_render_gnome(avk2::get121RenderGnome());
+    avk2::KernelSource kernel_sw_raytracing(avk2::get140SoftwareRaytracing());
 	std::vector<double> times;
 	const int NO_FACE_ID = -1;
 	for (int iter = 0; iter < 10; ++iter) {
@@ -66,21 +75,31 @@ int main(int argc, char **argv)
 
 		avk2::InstanceContext::renderDocStartCapture("render gnome");
 
-		const float FLT_MAX = std::numeric_limits<float>::max();
-		float initial_min_max_values[] = {FLT_MAX, FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX};
+		const float max_float = std::numeric_limits<float>::max();
+		float initial_min_max_values[] = {max_float, max_float, max_float, -max_float, -max_float, -max_float};
 		min_max_values_gpu.writeN(initial_min_max_values, 6);
 
 		unsigned int nvertices = vertices_with_uv.size();
 		kernel_gnome_min_max.exec(nvertices, gpu::WorkSize(VK_GROUP_SIZE, nvertices),
 			vertices_gpu, min_max_values_gpu);
 
-		kernel_render_gnome.initRender(w, h)
-			.geometry(vertices_gpu, faces_gpu)
-			.setDepthAttachment(output_depth_framebuffer_gpu, CLEAR_DEPTH_FRAMEBUFFER_WITH_MAX_VALUE)
-			.addAttachment(output_color_attachment_gpu, {0, 0, 0, 0})
-			.addAttachment(output_face_id_attachment_gpu, NO_FACE_ID)
-			.params((unsigned int) faces.size())
-			.exec(min_max_values_gpu, texture_gpu);
+        if (true) {
+            kernel_render_gnome.initRender(w, h)
+                .geometry(vertices_gpu, faces_gpu)
+                .setDepthAttachment(output_depth_framebuffer_gpu, CLEAR_DEPTH_FRAMEBUFFER_WITH_MAX_VALUE)
+                .addAttachment(output_color_attachment_gpu, {0, 0, 0, 0})
+                .addAttachment(output_face_id_attachment_gpu, NO_FACE_ID)
+                .params((unsigned int) faces.size())
+                .exec(min_max_values_gpu, texture_gpu);
+        } else {
+            kernel_sw_raytracing.initRender(w, h)
+                .geometry(screen_rect_vertices_gpu, screen_rect_faces_gpu)
+                .setDepthAttachment(output_depth_framebuffer_gpu, CLEAR_DEPTH_FRAMEBUFFER_WITH_MAX_VALUE)
+                .addAttachment(output_color_attachment_gpu, {0, 0, 0, 0})
+                .addAttachment(output_face_id_attachment_gpu, NO_FACE_ID)
+                .params((unsigned int) faces.size())
+                .exec(min_max_values_gpu, texture_gpu);
+        }
 
 		avk2::InstanceContext::renderDocEndCapture();
 

@@ -1,0 +1,52 @@
+#version 450
+
+#include <libgpu/vulkan/vk/common.vk>
+#include <libgpu/vulkan/vk/limits.vk>
+
+#include "defines.h"
+
+layout(std430, binding = 0) readonly  buffer InputBuffer  { float a[];         };
+layout(std430, binding = 1) writeonly buffer OutputBuffer { float a_reduced[]; };
+
+layout(push_constant) uniform PushConstants {
+    uint n;
+} params;
+
+shared float local_data[VK_GROUP_SIZE];
+
+layout(local_size_x = VK_GROUP_SIZE) in;
+
+void main() {
+    uint local_id = gl_LocalInvocationID.x;
+    uint group_id = gl_WorkGroupID.x;
+
+    uint group_size = gl_WorkGroupSize.x;
+    rassert(group_size == VK_GROUP_SIZE, 123154546);
+
+    uint global_id  = gl_GlobalInvocationID.x;
+    rassert(global_id == group_id * group_size + local_id, 42387990);
+
+    // Чтение данных
+    if (global_id < params.n) {
+        local_data[local_id] = a[global_id];
+    } else {
+        // Если размер входного массива не кратен рабочей группе
+        // то проще потокам за пределами массива подсунуть
+        // нейтральный элемент (с точки зрения поиска максимума)
+        local_data[local_id] = -FLT_MAX;
+    }
+
+    // Барьер для синхронизации всей рабочей группы
+    barrier();
+
+    // Мастер поток ищет максимум и записывает в выход
+    if (local_id == 0) {
+        float max_val = local_data[0];
+        for (uint i = 1; i < group_size; ++i) {
+            if (local_data[i] > max_val) {
+                max_val = local_data[i];
+            }
+        }
+        a_reduced[group_id] = max_val;
+    }
+}

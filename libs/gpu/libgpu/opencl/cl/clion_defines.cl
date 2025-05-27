@@ -66,6 +66,8 @@ size_t	get_global_offset	(uint dimindx);
 #define STATIC_KEYWORD static
 #endif
 
+#define FLT_MAX 0x1.fffffep127f
+
 #endif
 
 #endif // pragma once
